@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { supabase } from "@/lib/supabase";
 import { X } from "lucide-react";
 
 interface AddTransactionProps {
@@ -12,13 +11,12 @@ interface AddTransactionProps {
 
 export default function AddTransaction({ isOpen, onClose, onRefresh }: AddTransactionProps) {
   const [amount, setAmount] = useState("");
-  const [description, setDescription] = useState("");
-
+  
   if (!isOpen) return null;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    // Add your transaction logic here
+    // Your save logic here
     onClose();
     await onRefresh();
   };
@@ -29,9 +27,7 @@ export default function AddTransaction({ isOpen, onClose, onRefresh }: AddTransa
         <button onClick={onClose} className="absolute top-6 right-6 text-[#A0AEC0] hover:text-[#364d54]">
           <X size={24} />
         </button>
-        
-        <h2 className="text-2xl font-black mb-6">Add Transaction</h2>
-        
+        <h2 className="text-2xl font-black mb-6 text-[#3a5b5e]">Add Transaction</h2>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className="block text-[10px] font-black uppercase tracking-widest text-[#A0AEC0] mb-2">Amount (MVR)</label>
@@ -45,7 +41,7 @@ export default function AddTransaction({ isOpen, onClose, onRefresh }: AddTransa
             />
           </div>
           <button type="submit" className="w-full bg-[#3a5b5e] text-white py-4 rounded-2xl font-black uppercase tracking-widest shadow-lg active:scale-95 transition-all">
-            Save Transaction
+            Save
           </button>
         </form>
       </div>

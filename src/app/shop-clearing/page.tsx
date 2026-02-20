@@ -65,7 +65,7 @@ export default function ShopClearingPage() {
         ...prev,
         [hostId]: {
           ...existingRow,
-          [field]: value,
+          [field]: value || "",
         },
       };
     });
@@ -303,11 +303,11 @@ export default function ShopClearingPage() {
 
                   <div className="flex gap-2 flex-grow">
                     <input 
-                      type="number" placeholder="Bill (MVR)" value={row.billMvr} onChange={(e) => handleRowChange(host.id, "billMvr", e.target.value)}
+                      type="number" placeholder="Bill (MVR)" value={row.billMvr || ""} onChange={(e) => handleRowChange(host.id, "billMvr", e.target.value)}
                       className="w-1/2 bg-[#F8FAFB] border border-[#E0E7E9] rounded-2xl p-3 text-sm font-bold focus:outline-none focus:border-[#5fa4ad]"
                     />
                     <input 
-                      type="number" placeholder="Rate" value={row.rate} onChange={(e) => handleRowChange(host.id, "rate", e.target.value)}
+                      type="number" placeholder="Rate" value={row.rate || ""} onChange={(e) => handleRowChange(host.id, "rate", e.target.value)}
                       className="w-1/2 bg-[#F8FAFB] border border-[#E0E7E9] rounded-2xl p-3 text-sm font-bold focus:outline-none focus:border-[#5fa4ad]"
                     />
                   </div>
