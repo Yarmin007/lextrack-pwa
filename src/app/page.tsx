@@ -1,4 +1,5 @@
-import { Wallet, Landmark, TrendingDown, Plus, ReceiptText, User, Bell, Settings, PieChart } from "lucide-react";
+import { Wallet, Landmark, TrendingDown, Plus, ReceiptText, User, Bell, Settings, PieChart, ShoppingCart } from "lucide-react";
+import Link from "next/link";
 
 export default function Home() {
   return (
@@ -12,14 +13,15 @@ export default function Home() {
         </div>
         <nav className="space-y-3 flex-grow">
           {[
-            { icon: <Wallet size={20}/>, label: 'Dashboard', active: true },
-            { icon: <Landmark size={20}/>, label: 'Loans', active: false },
-            { icon: <ReceiptText size={20}/>, label: 'Bills', active: false },
-            { icon: <PieChart size={20}/>, label: 'Analytics', active: false },
+            { icon: <Wallet size={20}/>, label: 'Dashboard', active: true, href: '/' },
+            { icon: <Landmark size={20}/>, label: 'Loans', active: false, href: '#' },
+            { icon: <ReceiptText size={20}/>, label: 'Bills', active: false, href: '#' },
+            { icon: <PieChart size={20}/>, label: 'Analytics', active: false, href: '#' },
+            { icon: <ShoppingCart size={20}/>, label: 'Shop Clearing', active: false, href: '/shop-clearing' },
           ].map((item, i) => (
-            <button key={i} className={`w-full flex items-center gap-4 px-5 py-4 rounded-2xl text-sm font-bold transition-all ${item.active ? 'bg-[#3a5b5e] text-white shadow-lg' : 'hover:bg-[#F8FAFB]'}`}>
+            <Link key={i} href={item.href} className={`w-full flex items-center gap-4 px-5 py-4 rounded-2xl text-sm font-bold transition-all ${item.active ? 'bg-[#3a5b5e] text-white shadow-lg' : 'hover:bg-[#F8FAFB]'}`}>
               {item.icon} {item.label}
-            </button>
+            </Link>
           ))}
         </nav>
         <button className="flex items-center gap-4 px-5 py-4 text-sm font-bold opacity-40 hover:opacity-100 transition-opacity">
