@@ -57,7 +57,6 @@ export default function ShopClearingPage() {
     fetchMonthData();
   }, [clearingMonth]);
 
-  // FIXED: This function now properly provides empty strings to prevent the React crash!
   const handleRowChange = (hostId: string, field: "billMvr" | "rate", value: string) => {
     setRowData((prev) => {
       const existingRow = prev[hostId] || { billMvr: "", rate: "", isPaid: false, isMsgSent: false };
@@ -65,7 +64,7 @@ export default function ShopClearingPage() {
         ...prev,
         [hostId]: {
           ...existingRow,
-          [field]: value || "",
+          [field]: value || "", // Prevents "uncontrolled input" error
         },
       };
     });
@@ -77,7 +76,7 @@ export default function ShopClearingPage() {
       return;
     }
     const { data, error } = await supabase.from('hosts').insert({ name: newHostName, host_no: newHostNo }).select().single();
-    if (error) { showToast("Error adding customer. (Did you disable RLS?)", "error"); return; }
+    if (error) { showToast("Error adding customer. (Check RLS Settings)", "error"); return; }
     if (data) {
       setHosts([...hosts, data]);
       setNewHostName("");
@@ -92,7 +91,7 @@ export default function ShopClearingPage() {
       return;
     }
     const { data, error } = await supabase.from('bank_accounts').insert({ account_name: newBankName, account_number: newBankNo }).select().single();
-    if (error) { showToast("Error adding bank account. (Did you disable RLS?)", "error"); return; }
+    if (error) { showToast("Error adding bank account. (Check RLS Settings)", "error"); return; }
     if (data) {
       setBanks([...banks, data]);
       setNewBankName("");
@@ -131,7 +130,7 @@ export default function ShopClearingPage() {
       else showToast(`Updated data for ${hosts.find(h => h.id === hostId)?.name}!`);
     } else {
       const { data, error } = await supabase.from('shop_clearings').insert(payload).select().single();
-      if (error) showToast("Error saving data. (Did you disable RLS?)", "error");
+      if (error) showToast("Error saving data. (Check RLS Settings)", "error");
       if (data) {
         setRowData(prev => ({ ...prev, [hostId]: { ...prev[hostId], clearingId: data.id } }));
         showToast(`Saved data for ${hosts.find(h => h.id === hostId)?.name}!`);
@@ -156,10 +155,10 @@ export default function ShopClearingPage() {
     const today = new Date();
     const dateString = `${String(today.getDate()).padStart(2, '0')}/${String(today.getMonth() + 1).padStart(2, '0')}/${today.getFullYear()}`;
     
-    // Combining the exact invoice format + bank details into one sendable message
+    // FORMAT FIX: Adding explicit "Account:" label and divider for better WhatsApp detection
     const invoiceText = `*INVOICE*\nDate: ${dateString}\nBill To: ${host.name}\n\n- Shop Clearence ${usdAmount}$/-`;
-    const bankDetailsText = banks.map(b => `🏦 *${b.account_name}*\n${b.account_number}`).join('\n\n');
-    const finalMessage = `${invoiceText}\n\n${bankDetailsText}`;
+    const bankDetailsText = banks.map(b => `🏦 *${b.account_name}*\nAccount: ${b.account_number}`).join('\n\n');
+    const finalMessage = `${invoiceText}\n\n━━━━━━━━━━━━━━━\n\n${bankDetailsText}`;
 
     try {
       const encodedText = encodeURIComponent(finalMessage);
@@ -191,16 +190,17 @@ export default function ShopClearingPage() {
   };
 
   return (
-    <main className="min-h-screen bg-[#F8FAFB] text-[#364d54] font-sans flex overflow-hidden relative">
+    <main className="min-h-screen bg-[#F8FAFB] text-[#364d54] font-sans flex relative">
       
+      {/* 0. TOAST NOTIFICATIONS */}
       {toast && (
-        <div className={`fixed top-6 right-1/2 translate-x-1/2 lg:translate-x-0 lg:right-6 z-[100] px-6 py-4 rounded-2xl shadow-2xl flex items-center gap-3 text-sm font-bold animate-in fade-in slide-in-from-top-5 duration-300 ${toast.type === 'success' ? 'bg-[#3a5b5e] text-white' : 'bg-red-500 text-white'}`}>
+        <div className={`fixed top-6 right-1/2 translate-x-1/2 lg:translate-x-0 lg:right-6 z-[200] px-6 py-4 rounded-2xl shadow-2xl flex items-center gap-3 text-sm font-bold animate-in fade-in slide-in-from-top-5 duration-300 ${toast.type === 'success' ? 'bg-[#3a5b5e] text-white' : 'bg-red-500 text-white'}`}>
           {toast.type === 'success' ? <CheckCircle2 size={20} /> : <AlertCircle size={20} />}
           {toast.message}
         </div>
       )}
 
-      {/* 1. SIDEBAR */}
+      {/* 1. SIDEBAR (Desktop Only) */}
       <aside className="hidden lg:flex w-72 bg-white border-r border-[#E0E7E9] flex-col p-8 sticky top-0 h-screen shrink-0">
         <div className="mb-12">
           <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#5fa4ad] mb-1">LexCorp Systems</p>
@@ -225,8 +225,8 @@ export default function ShopClearingPage() {
       </aside>
 
       {/* 2. MAIN CONTENT AREA */}
-      <div className="flex-grow flex flex-col h-screen overflow-y-auto bg-[#F8FAFB]">
-        <div className="w-full max-w-[1100px] mx-auto px-6 py-8 md:py-12 pb-32 lg:pb-12">
+      <div className="flex-grow flex flex-col min-h-screen bg-[#F8FAFB]">
+        <div className="w-full max-w-[1100px] mx-auto px-6 py-8 md:py-12 pb-40 lg:pb-12">
           
           <header className="flex justify-between items-center mb-10">
             <div>
@@ -346,7 +346,8 @@ export default function ShopClearingPage() {
 
         </div>
 
-        <nav className="lg:hidden fixed bottom-8 left-1/2 -translate-x-1/2 w-[calc(100%-48px)] max-w-[400px] h-20 bg-white shadow-[0_20px_50px_rgba(0,0,0,0.1)] border border-[#E0E7E9] rounded-[2.5rem] flex justify-around items-center px-4 z-50">
+        {/* 3. MOBILE BOTTOM NAV (Fixed visibility & Z-Index) */}
+        <nav className="lg:hidden fixed bottom-8 left-1/2 -translate-x-1/2 w-[calc(100%-48px)] max-w-[400px] h-20 bg-white shadow-[0_20px_50px_rgba(0,0,0,0.1)] border border-[#E0E7E9] rounded-[2.5rem] flex justify-around items-center px-4 z-[100]">
           <Link href="/" className="p-3 text-[#A0AEC0]"><Wallet size={24} /></Link>
           <button className="relative -mt-14 active:scale-90 transition-transform">
             <div className="absolute inset-0 bg-[#3a5b5e] blur-xl opacity-20" />
