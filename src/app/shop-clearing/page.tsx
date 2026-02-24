@@ -32,6 +32,19 @@ export default function ShopClearingPage() {
   };
 
   useEffect(() => {
+    const savedRate = localStorage.getItem("lextrack_selling_rate");
+    if (savedRate) {
+      setSellingRate(savedRate);
+    }
+  }, []);
+
+  const handleRateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const newRate = e.target.value;
+    setSellingRate(newRate);
+    localStorage.setItem("lextrack_selling_rate", newRate);
+  };
+
+  useEffect(() => {
     async function fetchMonthData() {
       const { data: hostsData } = await supabase.from('hosts').select('*');
       const { data: banksData } = await supabase.from('bank_accounts').select('*');
@@ -176,21 +189,21 @@ export default function ShopClearingPage() {
     const dateString = `${String(today.getDate()).padStart(2, '0')}/${String(today.getMonth() + 1).padStart(2, '0')}/${today.getFullYear()}`;
     
     let invoiceText = `*INVOICE*\nDate: ${dateString}\nBill To: ${host.name}\n\n`;
-    if (shopClearanceUsd > 0) invoiceText += `- Shop Clearance: $${shopClearanceUsd.toFixed(2)}\n`;
+    if (shopClearanceUsd > 0) invoiceText += `• Shop Clearance ${shopClearanceUsd.toFixed(2)}$/-\n`;
     
     if (advances.length > 0) {
-      invoiceText += `\n*Advances:*\n`;
       advances.forEach((adv: any) => {
         const advUsd = (parseFloat(adv.amountMvr) || 0) / rate;
         const [y, m, d] = adv.date.split('-');
-        invoiceText += `- ${d}/${m}: $${advUsd.toFixed(2)} (MVR ${adv.amountMvr})\n`;
+        invoiceText += `• Advance (${d}/${m}) ${advUsd.toFixed(2)}$/- (MVR ${adv.amountMvr})\n`;
       });
     }
 
-    invoiceText += `\n*TOTAL DUE: $${totalDueUsd.toFixed(2)}*`;
+    // Completely stripped formatting so WhatsApp detects the bank link below
+    invoiceText += `\nTotal Due: ${totalDueUsd.toFixed(2)}$/-\n\n`;
 
-    const bankDetailsText = banks.map(b => `🏦 *${b.account_name}*\n${b.account_number}`).join('\n\n');
-    const finalMessage = `${invoiceText}\n\n━━━━━━━━━━━━━━━\n\n${bankDetailsText}`;
+    const bankDetailsText = banks.map(b => `🏦 ${b.account_name}\n${b.account_number}`).join('\n\n');
+    const finalMessage = `${invoiceText}${bankDetailsText}`;
 
     try {
       window.open(`https://wa.me/?text=${encodeURIComponent(finalMessage)}`, "_blank");
@@ -237,7 +250,7 @@ export default function ShopClearingPage() {
   // --- Global Math Calculations ---
   let globalInvestmentMvr = 0;
   let globalReceivedUsd = 0;
-  let globalProfitMvr = 0;
+  let globalExpectedProfitMvr = 0;
   let globalPendingUsd = 0;
 
   const currentSellRate = parseFloat(sellingRate) || 0;
@@ -256,8 +269,8 @@ export default function ShopClearingPage() {
     globalReceivedUsd += rec;
     globalPendingUsd += (rowTotalUsdDue - rec);
 
-    const rowProfitMvr = (rec * currentSellRate) - (rec * r);
-    globalProfitMvr += rowProfitMvr;
+    const expectedProfit = (rowTotalUsdDue * currentSellRate) - (rowTotalUsdDue * r);
+    globalExpectedProfitMvr += expectedProfit;
   });
 
   return (
@@ -298,7 +311,7 @@ export default function ShopClearingPage() {
                 <input type="month" value={clearingMonth} onChange={e => setClearingMonth(e.target.value)} className="bg-white border border-[#E0E7E9] rounded-lg px-2 py-1 text-xs font-bold text-[#5fa4ad] cursor-pointer"/>
                 <div className="flex items-center bg-white border border-[#E0E7E9] rounded-lg px-2 py-1">
                   <span className="text-[10px] font-black uppercase text-[#A0AEC0] mr-2">Sell Rate</span>
-                  <input type="number" value={sellingRate} onChange={e => setSellingRate(e.target.value)} className="w-16 bg-transparent border-none p-0 text-xs font-bold text-[#3a5b5e] focus:ring-0" />
+                  <input type="number" value={sellingRate} onChange={handleRateChange} className="w-16 bg-transparent border-none p-0 text-xs font-bold text-[#3a5b5e] focus:ring-0" />
                 </div>
               </div>
             </div>
@@ -325,7 +338,7 @@ export default function ShopClearingPage() {
             <div className="bg-[#3a5b5e] p-5 rounded-3xl shadow-xl text-white relative overflow-hidden">
               <div className="absolute top-0 right-0 w-24 h-24 bg-white/10 rounded-full blur-xl -mr-6 -mt-6" />
               <p className="text-[10px] font-black uppercase tracking-widest opacity-60 mb-1 flex items-center gap-1"><TrendingUp size={12}/> Est. Profit</p>
-              <p className="text-xl lg:text-2xl font-black text-green-300">MVR {globalProfitMvr.toFixed(0)}</p>
+              <p className="text-xl lg:text-2xl font-black text-green-300">MVR {globalExpectedProfitMvr.toFixed(0)}</p>
             </div>
           </div>
 
@@ -350,7 +363,14 @@ export default function ShopClearingPage() {
                   {/* Left: Info */}
                   <div className="lg:w-48 flex-shrink-0 flex justify-between lg:flex-col lg:justify-start">
                     <div>
-                      <h3 className="font-black text-lg text-[#364d54]">{host.name}</h3>
+                      <div className="flex items-center gap-2 mb-1">
+                        <h3 className="font-black text-lg text-[#364d54]">{host.name}</h3>
+                        {/* Icon-only Delete Button */}
+                        <button onClick={() => handleDeleteHost(host.id, host.name)} title="Permanently delete client" className="text-gray-300 hover:text-red-500 transition-colors">
+                          <UserMinus size={14} />
+                        </button>
+                      </div>
+                      
                       <p className="text-[10px] font-bold text-[#A0AEC0] uppercase tracking-wider mb-2">Host: {host.host_no}</p>
                       
                       {isFullyPaid ? (
@@ -358,12 +378,6 @@ export default function ShopClearingPage() {
                       ) : (
                         <p className="text-[10px] font-black uppercase text-orange-500 bg-orange-50 inline-block px-2 py-1 rounded-md mb-2">Owes: ${remaining.toFixed(2)}</p>
                       )}
-
-                      {/* NEW: Permanent Client Delete Button */}
-                      <button onClick={() => handleDeleteHost(host.id, host.name)} className="block text-[9px] text-red-400 font-bold uppercase tracking-widest mt-2 flex items-center gap-1 hover:text-red-600">
-                        <UserMinus size={10} /> Delete Client
-                      </button>
-
                     </div>
 
                     {/* Clear Month Record Button */}
