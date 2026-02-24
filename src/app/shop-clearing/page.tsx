@@ -2,26 +2,29 @@
 
 import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
-import { Wallet, Landmark, Plus, ReceiptText, User, Bell, Settings, PieChart, ShoppingCart, CheckCircle2, AlertCircle, Trash2 } from "lucide-react";
+import { Wallet, Plus, ShoppingCart, CheckCircle2, AlertCircle, Trash2, UserPlus, Landmark, X, Send, Calculator, Settings, PieChart, TrendingUp, UserMinus } from "lucide-react";
 import Link from "next/link";
 
 export default function ShopClearingPage() {
-  const [hosts, setHosts] = useState<{ id: string; name: string; host_no: string }[]>([]);
-  const [banks, setBanks] = useState<{ id: string; account_name: string; account_number: string }[]>([]);
+  const [hosts, setHosts] = useState<any[]>([]);
+  const [banks, setBanks] = useState<any[]>([]);
   
+  // Modal states
+  const [showAddUser, setShowAddUser] = useState(false);
+  const [showBanks, setShowBanks] = useState(false);
   const [toast, setToast] = useState<{ message: string, type: 'success' | 'error' } | null>(null);
-  
-  const [rowData, setRowData] = useState<Record<string, { clearingId?: string; billMvr: string; rate: string; isPaid: boolean; isMsgSent: boolean }>>({});
-  
-  const [clearingMonth, setClearingMonth] = useState(() => {
-    const now = new Date();
-    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-  });
 
   const [newHostName, setNewHostName] = useState("");
   const [newHostNo, setNewHostNo] = useState("");
   const [newBankName, setNewBankName] = useState("");
   const [newBankNo, setNewBankNo] = useState("");
+
+  const [sellingRate, setSellingRate] = useState("17.40");
+  const [rowData, setRowData] = useState<Record<string, any>>({});
+  const [clearingMonth, setClearingMonth] = useState(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  });
 
   const showToast = (message: string, type: 'success' | 'error' = 'success') => {
     setToast({ message, type });
@@ -45,8 +48,10 @@ export default function ShopClearingPage() {
         clearingsData.forEach((c) => {
           newRowData[c.host_id] = {
             clearingId: c.id,
-            billMvr: c.bill_amount_mvr.toString(),
-            rate: c.applied_rate.toString(),
+            billMvr: c.bill_amount_mvr?.toString() || "",
+            rate: c.applied_rate?.toString() || "15.42",
+            advances: c.advances_list || [],
+            received: c.received_usd?.toString() || "",
             isPaid: c.is_paid,
             isMsgSent: c.is_msg_sent
           };
@@ -57,46 +62,167 @@ export default function ShopClearingPage() {
     fetchMonthData();
   }, [clearingMonth]);
 
-  const handleRowChange = (hostId: string, field: "billMvr" | "rate", value: string) => {
+  const handleRowChange = (hostId: string, field: string, value: any) => {
     setRowData((prev) => {
-      const existingRow = prev[hostId] || { billMvr: "", rate: "", isPaid: false, isMsgSent: false };
-      return {
-        ...prev,
-        [hostId]: {
-          ...existingRow,
-          [field]: value || "", // Prevents "uncontrolled input" error
-        },
-      };
+      const existingRow = prev[hostId] || { billMvr: "", rate: "15.42", advances: [], received: "", isPaid: false, isMsgSent: false };
+      return { ...prev, [hostId]: { ...existingRow, [field]: value } };
     });
   };
 
-  const handleAddCustomer = async () => {
-    if (!newHostName || !newHostNo) {
-      showToast("Please enter both Name and Host No.", "error");
-      return;
+  const addAdvance = (hostId: string) => {
+    const row = rowData[hostId] || { billMvr: "", rate: "15.42", advances: [], received: "" };
+    const today = new Date().toISOString().split('T')[0];
+    const newAdvances = [...(row.advances || []), { date: today, amountMvr: "" }];
+    handleRowChange(hostId, "advances", newAdvances);
+  };
+
+  const updateAdvance = (hostId: string, index: number, field: string, value: string) => {
+    const row = rowData[hostId];
+    const newAdvances = [...row.advances];
+    newAdvances[index][field] = value;
+    handleRowChange(hostId, "advances", newAdvances);
+  };
+
+  const removeAdvance = (hostId: string, index: number) => {
+    const row = rowData[hostId];
+    const newAdvances = row.advances.filter((_: any, i: number) => i !== index);
+    handleRowChange(hostId, "advances", newAdvances);
+  };
+
+  const handleSaveToDatabase = async (hostId: string) => {
+    const row = rowData[hostId] || {};
+    
+    const bill = parseFloat(row.billMvr) || 0;
+    const rate = parseFloat(row.rate) || 15.42;
+    const received = parseFloat(row.received) || 0;
+    const advances = row.advances || [];
+    
+    const totalAdvancesMvr = advances.reduce((sum: number, adv: any) => sum + (parseFloat(adv.amountMvr) || 0), 0);
+    const totalDueUsd = (bill + totalAdvancesMvr) / rate;
+    const isPaid = received > 0 && received >= totalDueUsd;
+
+    const payload = {
+      host_id: hostId,
+      clearing_month: `${clearingMonth}-01`,
+      bill_amount_mvr: bill,
+      applied_rate: rate,
+      advances_list: advances,
+      received_usd: received,
+      is_paid: isPaid,
+      is_msg_sent: row.isMsgSent || false
+    };
+
+    if (row.clearingId) {
+      const { error } = await supabase.from('shop_clearings').update(payload).eq('id', row.clearingId);
+      if (error) showToast("Error saving data.", "error");
+      else showToast("Ledger updated!");
+    } else {
+      const { data, error } = await supabase.from('shop_clearings').insert(payload).select().single();
+      if (error) showToast("Error saving data.", "error");
+      if (data) {
+        setRowData(prev => ({ ...prev, [hostId]: { ...prev[hostId], clearingId: data.id } }));
+        showToast("Ledger saved!");
+      }
     }
+  };
+
+  const handleDeleteClearing = async (hostId: string) => {
+    const row = rowData[hostId];
+    if (!row?.clearingId) return;
+    
+    if (confirm("Are you sure you want to delete this month's record for this customer?")) {
+      const { error } = await supabase.from('shop_clearings').delete().eq('id', row.clearingId);
+      if (error) {
+        showToast("Error deleting record", "error");
+      } else {
+        const newRowData = { ...rowData };
+        delete newRowData[hostId];
+        setRowData(newRowData);
+        showToast("Record deleted successfully");
+      }
+    }
+  };
+
+  const handleDeleteHost = async (hostId: string, hostName: string) => {
+    if (confirm(`Are you sure you want to PERMANENTLY delete client ${hostName}? This cannot be undone.`)) {
+      const { error } = await supabase.from('hosts').delete().eq('id', hostId);
+      if (error) {
+        showToast("Error deleting client.", "error");
+      } else {
+        setHosts(hosts.filter(h => h.id !== hostId));
+        const newRowData = { ...rowData };
+        delete newRowData[hostId];
+        setRowData(newRowData);
+        showToast("Client permanently deleted.");
+      }
+    }
+  };
+
+  const handleWhatsApp = async (hostId: string) => {
+    const host = hosts.find((h) => h.id === hostId);
+    const row = rowData[hostId] || {};
+    
+    const billMvr = parseFloat(row.billMvr) || 0;
+    const rate = parseFloat(row.rate) || 15.42;
+    const advances = row.advances || [];
+    
+    if (banks.length === 0) return showToast("Add a bank account first.", "error");
+    
+    const shopClearanceUsd = billMvr / rate;
+    const totalAdvancesMvr = advances.reduce((sum: number, adv: any) => sum + (parseFloat(adv.amountMvr) || 0), 0);
+    const totalDueUsd = shopClearanceUsd + (totalAdvancesMvr / rate);
+    
+    const today = new Date();
+    const dateString = `${String(today.getDate()).padStart(2, '0')}/${String(today.getMonth() + 1).padStart(2, '0')}/${today.getFullYear()}`;
+    
+    let invoiceText = `*INVOICE*\nDate: ${dateString}\nBill To: ${host.name}\n\n`;
+    if (shopClearanceUsd > 0) invoiceText += `- Shop Clearance: $${shopClearanceUsd.toFixed(2)}\n`;
+    
+    if (advances.length > 0) {
+      invoiceText += `\n*Advances:*\n`;
+      advances.forEach((adv: any) => {
+        const advUsd = (parseFloat(adv.amountMvr) || 0) / rate;
+        const [y, m, d] = adv.date.split('-');
+        invoiceText += `- ${d}/${m}: $${advUsd.toFixed(2)} (MVR ${adv.amountMvr})\n`;
+      });
+    }
+
+    invoiceText += `\n*TOTAL DUE: $${totalDueUsd.toFixed(2)}*`;
+
+    const bankDetailsText = banks.map(b => `🏦 *${b.account_name}*\n${b.account_number}`).join('\n\n');
+    const finalMessage = `${invoiceText}\n\n━━━━━━━━━━━━━━━\n\n${bankDetailsText}`;
+
+    try {
+      window.open(`https://wa.me/?text=${encodeURIComponent(finalMessage)}`, "_blank");
+      setRowData(prev => ({ ...prev, [hostId]: { ...prev[hostId], isMsgSent: true } }));
+      if (row.clearingId) {
+        await supabase.from('shop_clearings').update({ is_msg_sent: true }).eq('id', row.clearingId);
+      }
+    } catch (err) {
+      showToast("Failed to open WhatsApp.", "error");
+    }
+  };
+
+  const handleAddCustomer = async () => {
+    if (!newHostName || !newHostNo) return showToast("Enter Name and Host No.", "error");
     const { data, error } = await supabase.from('hosts').insert({ name: newHostName, host_no: newHostNo }).select().single();
-    if (error) { showToast("Error adding customer. (Check RLS Settings)", "error"); return; }
+    if (error) return showToast("Error adding customer.", "error");
     if (data) {
       setHosts([...hosts, data]);
-      setNewHostName("");
-      setNewHostNo("");
-      showToast("Customer added successfully!");
+      setNewHostName(""); setNewHostNo("");
+      setShowAddUser(false);
+      showToast("Customer added!");
     }
   };
 
   const handleAddBank = async () => {
-    if (!newBankName || !newBankNo) {
-      showToast("Please enter Bank Name and Account Number.", "error");
-      return;
-    }
+    if (!newBankName || !newBankNo) return showToast("Enter Bank details.", "error");
     const { data, error } = await supabase.from('bank_accounts').insert({ account_name: newBankName, account_number: newBankNo }).select().single();
-    if (error) { showToast("Error adding bank account. (Check RLS Settings)", "error"); return; }
+    if (error) return showToast("Error adding bank.", "error");
     if (data) {
       setBanks([...banks, data]);
-      setNewBankName("");
-      setNewBankNo("");
-      showToast("Bank account added!");
+      setNewBankName(""); setNewBankNo("");
+      showToast("Bank added!");
     }
   };
 
@@ -104,241 +230,194 @@ export default function ShopClearingPage() {
     const { error } = await supabase.from('bank_accounts').delete().eq('id', id);
     if (!error) {
       setBanks(banks.filter(b => b.id !== id));
-      showToast("Bank account removed.");
+      showToast("Bank removed.");
     }
   };
 
-  const handleSaveToDatabase = async (hostId: string) => {
-    const row = rowData[hostId];
-    if (!row?.billMvr || !row?.rate) {
-      showToast("Please fill Bill and Rate before saving.", "error");
-      return;
-    }
+  // --- Global Math Calculations ---
+  let globalInvestmentMvr = 0;
+  let globalReceivedUsd = 0;
+  let globalProfitMvr = 0;
+  let globalPendingUsd = 0;
+
+  const currentSellRate = parseFloat(sellingRate) || 0;
+
+  Object.values(rowData).forEach(row => {
+    const b = parseFloat(row.billMvr) || 0;
+    const r = parseFloat(row.rate) || 15.42;
+    const rec = parseFloat(row.received) || 0;
+    const advs = row.advances || [];
     
-    const payload = {
-      host_id: hostId,
-      clearing_month: `${clearingMonth}-01`,
-      bill_amount_mvr: parseFloat(row.billMvr),
-      applied_rate: parseFloat(row.rate),
-      is_paid: row.isPaid || false,
-      is_msg_sent: row.isMsgSent || false
-    };
-
-    if (row.clearingId) {
-      const { error } = await supabase.from('shop_clearings').update(payload).eq('id', row.clearingId);
-      if (error) showToast("Error updating data.", "error");
-      else showToast(`Updated data for ${hosts.find(h => h.id === hostId)?.name}!`);
-    } else {
-      const { data, error } = await supabase.from('shop_clearings').insert(payload).select().single();
-      if (error) showToast("Error saving data. (Check RLS Settings)", "error");
-      if (data) {
-        setRowData(prev => ({ ...prev, [hostId]: { ...prev[hostId], clearingId: data.id } }));
-        showToast(`Saved data for ${hosts.find(h => h.id === hostId)?.name}!`);
-      }
-    }
-  };
-
-  const handleWhatsApp = async (hostId: string) => {
-    const host = hosts.find((h) => h.id === hostId);
-    const row = rowData[hostId];
-
-    if (!host || !row?.billMvr || !row?.rate) {
-      showToast("Please enter the Bill and Rate first.", "error");
-      return;
-    }
-    if (banks.length === 0) {
-      showToast("Please add at least one bank account in settings.", "error");
-      return;
-    }
-
-    const usdAmount = (parseFloat(row.billMvr) / parseFloat(row.rate)).toFixed(2);
-    const today = new Date();
-    const dateString = `${String(today.getDate()).padStart(2, '0')}/${String(today.getMonth() + 1).padStart(2, '0')}/${today.getFullYear()}`;
+    const totalAdvancesMvr = advs.reduce((sum: number, adv: any) => sum + (parseFloat(adv.amountMvr) || 0), 0);
+    const rowInvestmentMvr = b + totalAdvancesMvr;
+    const rowTotalUsdDue = rowInvestmentMvr / r;
     
-    // FORMAT FIX: Adding explicit "Account:" label and divider for better WhatsApp detection
-    const invoiceText = `*INVOICE*\nDate: ${dateString}\nBill To: ${host.name}\n\n- Shop Clearence ${usdAmount}$/-`;
-    const bankDetailsText = banks.map(b => `🏦 *${b.account_name}*\nAccount: ${b.account_number}`).join('\n\n');
-    const finalMessage = `${invoiceText}\n\n━━━━━━━━━━━━━━━\n\n${bankDetailsText}`;
+    globalInvestmentMvr += rowInvestmentMvr;
+    globalReceivedUsd += rec;
+    globalPendingUsd += (rowTotalUsdDue - rec);
 
-    try {
-      const encodedText = encodeURIComponent(finalMessage);
-      window.open(`https://wa.me/?text=${encodedText}`, "_blank");
-      
-      setRowData(prev => ({ ...prev, [hostId]: { ...prev[hostId], isMsgSent: true } }));
-      if (row.clearingId) {
-        await supabase.from('shop_clearings').update({ is_msg_sent: true }).eq('id', row.clearingId);
-      }
-      showToast("Invoice opened in WhatsApp!");
-    } catch (err) {
-      showToast("Failed to open WhatsApp.", "error");
-    }
-  };
-
-  const togglePaidStatus = async (hostId: string) => {
-    const row = rowData[hostId];
-    if (!row?.clearingId) {
-      showToast("Please hit 'Save' first before marking as Paid.", "error");
-      return;
-    }
-
-    const newPaidStatus = !row.isPaid;
-    
-    setRowData(prev => ({ ...prev, [hostId]: { ...prev[hostId], isPaid: newPaidStatus } }));
-    
-    const { error } = await supabase.from('shop_clearings').update({ is_paid: newPaidStatus }).eq('id', row.clearingId);
-    if (error) showToast("Failed to update status.", "error");
-  };
+    const rowProfitMvr = (rec * currentSellRate) - (rec * r);
+    globalProfitMvr += rowProfitMvr;
+  });
 
   return (
-    <main className="min-h-screen bg-[#F8FAFB] text-[#364d54] font-sans flex relative">
+    <main className="min-h-screen bg-[#F0F4F8] text-[#364d54] font-sans flex relative">
       
-      {/* 0. TOAST NOTIFICATIONS */}
+      {/* TOAST NOTIFICATIONS */}
       {toast && (
-        <div className={`fixed top-6 right-1/2 translate-x-1/2 lg:translate-x-0 lg:right-6 z-[200] px-6 py-4 rounded-2xl shadow-2xl flex items-center gap-3 text-sm font-bold animate-in fade-in slide-in-from-top-5 duration-300 ${toast.type === 'success' ? 'bg-[#3a5b5e] text-white' : 'bg-red-500 text-white'}`}>
+        <div className={`fixed top-6 right-1/2 translate-x-1/2 lg:translate-x-0 lg:right-6 z-[300] px-6 py-4 rounded-2xl shadow-2xl flex items-center gap-3 text-sm font-bold animate-in fade-in slide-in-from-top-5 duration-300 ${toast.type === 'success' ? 'bg-[#3a5b5e] text-white' : 'bg-red-500 text-white'}`}>
           {toast.type === 'success' ? <CheckCircle2 size={20} /> : <AlertCircle size={20} />}
           {toast.message}
         </div>
       )}
 
-      {/* 1. SIDEBAR (Desktop Only) */}
-      <aside className="hidden lg:flex w-72 bg-white border-r border-[#E0E7E9] flex-col p-8 sticky top-0 h-screen shrink-0">
+      {/* 1. DESKTOP SIDEBAR */}
+      <aside className="hidden lg:flex w-72 bg-white border-r border-[#E0E7E9] flex-col p-8 sticky top-0 h-screen shrink-0 z-40">
         <div className="mb-12">
           <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#5fa4ad] mb-1">LexCorp Systems</p>
           <h1 className="text-2xl font-black tracking-tighter uppercase">Lextrack</h1>
         </div>
         <nav className="space-y-3 flex-grow">
-          {[
-            { icon: <Wallet size={20}/>, label: 'Dashboard', active: false, href: '/' },
-            { icon: <Landmark size={20}/>, label: 'Loans', active: false, href: '#' },
-            { icon: <ReceiptText size={20}/>, label: 'Bills', active: false, href: '#' },
-            { icon: <PieChart size={20}/>, label: 'Analytics', active: false, href: '#' },
-            { icon: <ShoppingCart size={20}/>, label: 'Shop Clearing', active: true, href: '/shop-clearing' },
-          ].map((item, i) => (
-            <Link key={i} href={item.href} className={`w-full flex items-center gap-4 px-5 py-4 rounded-2xl text-sm font-bold transition-all ${item.active ? 'bg-[#3a5b5e] text-white shadow-lg' : 'hover:bg-[#F8FAFB]'}`}>
-              {item.icon} {item.label}
-            </Link>
-          ))}
+          <Link href="/" className="w-full flex items-center gap-4 px-5 py-4 rounded-2xl text-sm font-bold hover:bg-[#F8FAFB] text-[#A0AEC0] transition-all"><Wallet size={20}/> Dashboard</Link>
+          <Link href="/splitter" className="w-full flex items-center gap-4 px-5 py-4 rounded-2xl text-sm font-bold hover:bg-[#F8FAFB] text-[#A0AEC0] transition-all"><Calculator size={20}/> Splitter</Link>
+          <Link href="/shop-clearing" className="w-full flex items-center gap-4 px-5 py-4 rounded-2xl text-sm font-bold bg-[#3a5b5e] text-white shadow-lg transition-all"><ShoppingCart size={20}/> Clearing</Link>
+          <Link href="#" className="w-full flex items-center gap-4 px-5 py-4 rounded-2xl text-sm font-bold hover:bg-[#F8FAFB] text-[#A0AEC0] transition-all"><PieChart size={20}/> Analytics</Link>
         </nav>
-        <button className="flex items-center gap-4 px-5 py-4 text-sm font-bold opacity-40 hover:opacity-100 transition-opacity">
-          <Settings size={20}/> Settings
-        </button>
+        <button className="flex items-center gap-4 px-5 py-4 text-sm font-bold opacity-40 hover:opacity-100 transition-opacity"><Settings size={20}/> Settings</button>
       </aside>
 
       {/* 2. MAIN CONTENT AREA */}
-      <div className="flex-grow flex flex-col min-h-screen bg-[#F8FAFB]">
-        <div className="w-full max-w-[1100px] mx-auto px-6 py-8 md:py-12 pb-40 lg:pb-12">
+      <div className="flex-grow flex flex-col min-h-screen bg-[#F0F4F8] overflow-y-auto">
+        <div className="w-full max-w-[1200px] mx-auto px-4 lg:px-8 py-6 lg:py-10 pb-40">
           
-          <header className="flex justify-between items-center mb-10">
+          {/* Header & Controls */}
+          <header className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8">
             <div>
-              <h2 className="text-2xl md:text-3xl font-black tracking-tight">Shop Clearing</h2>
-              <p className="text-xs font-bold text-[#A0AEC0] uppercase tracking-widest mt-1">Manage Customers & Invoices</p>
+              <h2 className="text-2xl lg:text-3xl font-black tracking-tight">Ledger</h2>
+              <div className="flex items-center gap-3 mt-1">
+                <input type="month" value={clearingMonth} onChange={e => setClearingMonth(e.target.value)} className="bg-white border border-[#E0E7E9] rounded-lg px-2 py-1 text-xs font-bold text-[#5fa4ad] cursor-pointer"/>
+                <div className="flex items-center bg-white border border-[#E0E7E9] rounded-lg px-2 py-1">
+                  <span className="text-[10px] font-black uppercase text-[#A0AEC0] mr-2">Sell Rate</span>
+                  <input type="number" value={sellingRate} onChange={e => setSellingRate(e.target.value)} className="w-16 bg-transparent border-none p-0 text-xs font-bold text-[#3a5b5e] focus:ring-0" />
+                </div>
+              </div>
             </div>
-            <div className="flex items-center gap-3">
-              <button className="hidden sm:flex w-12 h-12 rounded-2xl bg-white border border-[#E0E7E9] items-center justify-center shadow-sm"><Bell size={20}/></button>
-              <button className="w-12 h-12 rounded-2xl bg-white border border-[#E0E7E9] flex items-center justify-center shadow-sm">
-                <User size={20} className="text-[#3a5b5e]" />
-              </button>
+            <div className="flex gap-2 w-full md:w-auto">
+              <button onClick={() => setShowBanks(true)} className="flex-1 md:flex-none h-11 px-4 rounded-xl bg-white border border-[#E0E7E9] flex items-center justify-center gap-2 shadow-sm text-[#364d54] font-bold text-xs"><Landmark size={16}/> Banks</button>
+              <button onClick={() => setShowAddUser(true)} className="flex-1 md:flex-none h-11 px-4 rounded-xl bg-[#3a5b5e] flex items-center justify-center gap-2 shadow-sm text-white font-bold text-xs"><UserPlus size={16}/> Add Client</button>
             </div>
           </header>
 
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-            <div className="bg-white border border-[#E0E7E9] rounded-[2rem] p-6 shadow-sm flex flex-col justify-between">
-              <div>
-                <label className="block text-[11px] font-black uppercase tracking-widest text-[#A0AEC0] mb-3">Your Bank Accounts (Sent with Invoice)</label>
-                <div className="space-y-2 mb-4">
-                  {banks.map(bank => (
-                    <div key={bank.id} className="flex justify-between items-center bg-[#F8FAFB] p-3 rounded-xl border border-[#E0E7E9]">
-                      <div>
-                        <p className="text-xs font-bold text-[#364d54]">{bank.account_name}</p>
-                        <p className="text-[10px] text-[#A0AEC0] font-mono">{bank.account_number}</p>
-                      </div>
-                      <button onClick={() => handleDeleteBank(bank.id)} className="text-red-400 hover:text-red-600 p-2"><Trash2 size={16} /></button>
-                    </div>
-                  ))}
-                  {banks.length === 0 && <p className="text-xs text-[#A0AEC0] italic">No bank accounts added yet.</p>}
-                </div>
-              </div>
-              <div className="flex gap-2">
-                <input type="text" placeholder="e.g. BML USD" value={newBankName} onChange={(e) => setNewBankName(e.target.value)} className="w-1/2 bg-[#F8FAFB] border border-[#E0E7E9] rounded-2xl p-3 text-xs font-bold focus:outline-none focus:border-[#5fa4ad]"/>
-                <input type="text" placeholder="Account No." value={newBankNo} onChange={(e) => setNewBankNo(e.target.value)} className="w-1/2 bg-[#F8FAFB] border border-[#E0E7E9] rounded-2xl p-3 text-xs font-bold focus:outline-none focus:border-[#5fa4ad]"/>
-                <button onClick={handleAddBank} className="bg-[#3a5b5e] text-white px-4 rounded-2xl active:scale-95 transition-all"><Plus size={16} /></button>
-              </div>
+          {/* Business Analytics Cards */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-6 mb-8">
+            <div className="bg-white p-5 rounded-3xl border border-[#E0E7E9] shadow-sm">
+              <p className="text-[10px] font-black uppercase tracking-widest text-[#A0AEC0] mb-1">Total Investment</p>
+              <p className="text-xl lg:text-2xl font-black text-[#364d54]">MVR {globalInvestmentMvr.toFixed(0)}</p>
             </div>
-
-            <div className="bg-white border border-[#E0E7E9] rounded-[2rem] p-6 shadow-sm space-y-6">
-              <div>
-                <label className="block text-[11px] font-black uppercase tracking-widest text-[#A0AEC0] mb-2">Select Filter Month</label>
-                <input 
-                  type="month"
-                  className="w-full bg-[#F8FAFB] border border-[#E0E7E9] rounded-2xl p-4 text-sm font-bold focus:outline-none focus:border-[#5fa4ad] text-[#3a5b5e]"
-                  value={clearingMonth}
-                  onChange={(e) => setClearingMonth(e.target.value)}
-                />
-              </div>
-              <div>
-                <label className="block text-[11px] font-black uppercase tracking-widest text-[#A0AEC0] mb-3">Add New Customer</label>
-                <div className="flex gap-2">
-                  <input type="text" placeholder="Name" value={newHostName} onChange={(e) => setNewHostName(e.target.value)} className="w-full bg-[#F8FAFB] border border-[#E0E7E9] rounded-2xl p-4 text-sm font-bold focus:outline-none focus:border-[#5fa4ad]"/>
-                  <input type="text" placeholder="Host No." value={newHostNo} onChange={(e) => setNewHostNo(e.target.value)} className="w-32 bg-[#F8FAFB] border border-[#E0E7E9] rounded-2xl p-4 text-sm font-bold focus:outline-none focus:border-[#5fa4ad]"/>
-                  <button onClick={handleAddCustomer} className="bg-[#3a5b5e] text-white px-6 rounded-2xl font-black active:scale-95 transition-all"><Plus size={20} /></button>
-                </div>
-              </div>
+            <div className="bg-white p-5 rounded-3xl border border-[#E0E7E9] shadow-sm">
+              <p className="text-[10px] font-black uppercase tracking-widest text-[#A0AEC0] mb-1">Total Pending</p>
+              <p className="text-xl lg:text-2xl font-black text-orange-500">${globalPendingUsd.toFixed(2)}</p>
+            </div>
+            <div className="bg-white p-5 rounded-3xl border border-[#E0E7E9] shadow-sm">
+              <p className="text-[10px] font-black uppercase tracking-widest text-[#A0AEC0] mb-1">Total Received</p>
+              <p className="text-xl lg:text-2xl font-black text-green-500">${globalReceivedUsd.toFixed(2)}</p>
+            </div>
+            <div className="bg-[#3a5b5e] p-5 rounded-3xl shadow-xl text-white relative overflow-hidden">
+              <div className="absolute top-0 right-0 w-24 h-24 bg-white/10 rounded-full blur-xl -mr-6 -mt-6" />
+              <p className="text-[10px] font-black uppercase tracking-widest opacity-60 mb-1 flex items-center gap-1"><TrendingUp size={12}/> Est. Profit</p>
+              <p className="text-xl lg:text-2xl font-black text-green-300">MVR {globalProfitMvr.toFixed(0)}</p>
             </div>
           </div>
 
+          {/* Desktop & Mobile Responsive List */}
           <div className="space-y-4">
-            <h3 className="text-[11px] font-black uppercase tracking-[0.2em] text-[#A0AEC0] mb-4">Clearance List for {clearingMonth}</h3>
-            
-            {hosts.map((host) => {
-              const row = rowData[host.id] || { billMvr: "", rate: "", isPaid: false, isMsgSent: false };
-              const usd = row.billMvr && row.rate ? (parseFloat(row.billMvr) / parseFloat(row.rate)).toFixed(2) : "0.00";
+            {hosts.map(host => {
+              const row = rowData[host.id] || { billMvr: "", rate: "15.42", advances: [], received: "" };
+              
+              const b = parseFloat(row.billMvr) || 0;
+              const r = parseFloat(row.rate) || 15.42;
+              const advs = row.advances || [];
+              const rec = parseFloat(row.received) || 0;
+              
+              const totalAdvancesMvr = advs.reduce((sum: number, adv: any) => sum + (parseFloat(adv.amountMvr) || 0), 0);
+              const totalDueUsd = (b + totalAdvancesMvr) / r;
+              const remaining = totalDueUsd - rec;
+              const isFullyPaid = remaining <= 0.01 && totalDueUsd > 0;
 
               return (
-                <div key={host.id} className="bg-white border border-[#E0E7E9] rounded-[2rem] p-5 shadow-sm flex flex-col xl:flex-row gap-4 xl:items-center">
+                <div key={host.id} className="bg-white rounded-[2rem] p-5 shadow-sm border border-[#E0E7E9] flex flex-col lg:flex-row gap-6 lg:items-stretch">
                   
-                  <div className="w-full xl:w-40 flex-shrink-0">
-                    <p className="font-bold text-[#364d54] truncate">{host.name}</p>
-                    <p className="text-[10px] text-[#A0AEC0] uppercase tracking-widest font-bold">Host: {host.host_no}</p>
+                  {/* Left: Info */}
+                  <div className="lg:w-48 flex-shrink-0 flex justify-between lg:flex-col lg:justify-start">
+                    <div>
+                      <h3 className="font-black text-lg text-[#364d54]">{host.name}</h3>
+                      <p className="text-[10px] font-bold text-[#A0AEC0] uppercase tracking-wider mb-2">Host: {host.host_no}</p>
+                      
+                      {isFullyPaid ? (
+                        <span className="bg-green-100 text-green-600 text-[10px] font-black px-2 py-1 rounded-md uppercase tracking-wider">Paid</span>
+                      ) : (
+                        <p className="text-[10px] font-black uppercase text-orange-500 bg-orange-50 inline-block px-2 py-1 rounded-md mb-2">Owes: ${remaining.toFixed(2)}</p>
+                      )}
+
+                      {/* NEW: Permanent Client Delete Button */}
+                      <button onClick={() => handleDeleteHost(host.id, host.name)} className="block text-[9px] text-red-400 font-bold uppercase tracking-widest mt-2 flex items-center gap-1 hover:text-red-600">
+                        <UserMinus size={10} /> Delete Client
+                      </button>
+
+                    </div>
+
+                    {/* Clear Month Record Button */}
+                    {row.clearingId && (
+                      <button onClick={() => handleDeleteClearing(host.id)} title="Clear this month's record" className="text-red-300 hover:text-red-500 mt-auto bg-red-50 w-8 h-8 rounded-full flex items-center justify-center transition-colors">
+                        <Trash2 size={14}/>
+                      </button>
+                    )}
                   </div>
 
-                  <div className="flex gap-2 flex-grow">
-                    <input 
-                      type="number" placeholder="Bill (MVR)" value={row.billMvr || ""} onChange={(e) => handleRowChange(host.id, "billMvr", e.target.value)}
-                      className="w-1/2 bg-[#F8FAFB] border border-[#E0E7E9] rounded-2xl p-3 text-sm font-bold focus:outline-none focus:border-[#5fa4ad]"
-                    />
-                    <input 
-                      type="number" placeholder="Rate" value={row.rate || ""} onChange={(e) => handleRowChange(host.id, "rate", e.target.value)}
-                      className="w-1/2 bg-[#F8FAFB] border border-[#E0E7E9] rounded-2xl p-3 text-sm font-bold focus:outline-none focus:border-[#5fa4ad]"
-                    />
+                  {/* Middle: Primary Inputs */}
+                  <div className="grid grid-cols-3 gap-3 lg:w-72 flex-shrink-0">
+                    <div className="flex flex-col">
+                      <label className="text-[9px] font-black uppercase text-[#A0AEC0] mb-1 pl-1">Bill (MVR)</label>
+                      <input type="number" placeholder="0" value={row.billMvr} onChange={(e) => handleRowChange(host.id, "billMvr", e.target.value)} className="bg-[#F8FAFB] border-none rounded-xl p-3 text-sm font-bold focus:ring-1 focus:ring-[#5fa4ad]" />
+                    </div>
+                    <div className="flex flex-col">
+                      <label className="text-[9px] font-black uppercase text-[#A0AEC0] mb-1 pl-1">Rate</label>
+                      <input type="number" value={row.rate} onChange={(e) => handleRowChange(host.id, "rate", e.target.value)} className="bg-[#F8FAFB] border-none rounded-xl p-3 text-sm font-bold focus:ring-1 focus:ring-[#5fa4ad]" />
+                    </div>
+                    <div className="flex flex-col">
+                      <label className="text-[9px] font-black uppercase text-green-600 mb-1 pl-1">Recv ($)</label>
+                      <input type="number" placeholder="0" value={row.received} onChange={(e) => handleRowChange(host.id, "received", e.target.value)} className="bg-green-50 border-none rounded-xl p-3 text-sm font-bold text-green-700 focus:ring-1 focus:ring-green-400" />
+                    </div>
                   </div>
 
-                  <div className="w-20 text-center xl:text-right flex-shrink-0">
-                    <p className="text-[10px] text-[#A0AEC0] font-black uppercase tracking-widest">USD</p>
-                    <p className="font-black text-[#5fa4ad] text-lg">${usd}</p>
+                  {/* Middle 2: Advances Array */}
+                  <div className="flex-grow bg-[#F8FAFB] rounded-2xl p-4 border border-[#E0E7E9]/50">
+                    <div className="flex justify-between items-center mb-3">
+                      <h4 className="text-[10px] font-black uppercase text-[#A0AEC0] tracking-widest">Advances (MVR)</h4>
+                      <button onClick={() => addAdvance(host.id)} className="text-[#5fa4ad] font-bold text-[10px] uppercase flex items-center gap-1 bg-white px-2 py-1 rounded shadow-sm"><Plus size={12}/> Add</button>
+                    </div>
+                    <div className="space-y-2">
+                      {advs.length === 0 && <p className="text-xs text-gray-400 italic">No advances recorded.</p>}
+                      {advs.map((adv: any, i: number) => (
+                        <div key={i} className="flex gap-2 items-center">
+                          <input type="date" value={adv.date} onChange={e => updateAdvance(host.id, i, "date", e.target.value)} className="w-32 bg-white border-none rounded-lg p-2 text-xs font-bold text-[#A0AEC0] focus:ring-1 focus:ring-[#5fa4ad]"/>
+                          <input type="number" placeholder="MVR Amount" value={adv.amountMvr} onChange={e => updateAdvance(host.id, i, "amountMvr", e.target.value)} className="flex-grow bg-white border-none rounded-lg p-2 text-xs font-bold focus:ring-1 focus:ring-[#5fa4ad]"/>
+                          <button onClick={() => removeAdvance(host.id, i)} className="text-red-300 hover:text-red-500 p-1"><X size={16}/></button>
+                        </div>
+                      ))}
+                    </div>
                   </div>
 
-                  <div className="flex gap-2 flex-shrink-0">
-                    <button 
-                      onClick={() => togglePaidStatus(host.id)}
-                      className={`px-4 py-3 rounded-2xl text-xs font-black uppercase tracking-widest transition-all ${row.isPaid ? 'bg-green-500 text-white shadow-md' : 'bg-[#E0E7E9] text-[#A0AEC0] hover:bg-gray-300'}`}
-                    >
-                      {row.isPaid ? 'Paid' : 'Unpaid'}
+                  {/* Right: Actions */}
+                  <div className="flex lg:flex-col gap-2 lg:w-28 flex-shrink-0">
+                    <button onClick={() => handleWhatsApp(host.id)} className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${row.isMsgSent ? 'bg-[#e0f2fe] text-[#0284c7]' : 'bg-white border border-[#E0E7E9] text-[#5fa4ad] hover:bg-gray-50'}`}>
+                      <Send size={14}/> WA
                     </button>
-
-                    <button 
-                      onClick={() => handleWhatsApp(host.id)}
-                      className={`px-4 py-3 rounded-2xl text-xs font-black uppercase tracking-widest transition-all ${row.isMsgSent ? 'bg-blue-500 text-white shadow-md' : 'bg-[#5fa4ad] text-white hover:bg-[#4d868e]'}`}
-                    >
-                      {row.isMsgSent ? 'WA Sent' : 'Send WA'}
-                    </button>
-
-                    <button 
-                      onClick={() => handleSaveToDatabase(host.id)}
-                      className="bg-[#3a5b5e] text-white px-4 py-3 rounded-2xl font-black text-xs uppercase tracking-widest active:scale-95 transition-all hover:bg-[#2b4446]"
-                    >
+                    <button onClick={() => handleSaveToDatabase(host.id)} className="flex-1 bg-[#3a5b5e] text-white py-3 rounded-xl font-black text-[10px] uppercase tracking-widest active:scale-95 transition-all shadow-md">
                       Save
                     </button>
                   </div>
+
                 </div>
               );
             })}
@@ -346,16 +425,67 @@ export default function ShopClearingPage() {
 
         </div>
 
-        {/* 3. MOBILE BOTTOM NAV (Fixed visibility & Z-Index) */}
-        <nav className="lg:hidden fixed bottom-8 left-1/2 -translate-x-1/2 w-[calc(100%-48px)] max-w-[400px] h-20 bg-white shadow-[0_20px_50px_rgba(0,0,0,0.1)] border border-[#E0E7E9] rounded-[2.5rem] flex justify-around items-center px-4 z-[100]">
-          <Link href="/" className="p-3 text-[#A0AEC0]"><Wallet size={24} /></Link>
-          <button className="relative -mt-14 active:scale-90 transition-transform">
-            <div className="absolute inset-0 bg-[#3a5b5e] blur-xl opacity-20" />
-            <div className="relative w-16 h-16 bg-[#3a5b5e] rounded-[1.5rem] flex items-center justify-center shadow-lg border-4 border-white"><Plus size={32} className="text-white" /></div>
+        {/* MOBILE BOTTOM NAV - Pill Shaped */}
+        <nav className="lg:hidden fixed bottom-6 left-1/2 -translate-x-1/2 w-[90%] max-w-[400px] h-16 bg-white shadow-[0_10px_40px_rgba(0,0,0,0.1)] rounded-full border border-gray-100 flex justify-around items-center px-6 z-[100]">
+          <Link href="/" className="text-gray-400 hover:text-[#3a5b5e] transition-colors"><Wallet size={20} /></Link>
+          <button className="text-gray-400 hover:text-[#3a5b5e] transition-colors">
+            <Plus size={24} className="bg-gray-50 hover:bg-[#e0f2fe] p-1.5 rounded-xl transition-all" />
           </button>
-          <Link href="/shop-clearing" className="p-3 text-[#3a5b5e]"><ShoppingCart size={24} /></Link>
+          <Link href="/splitter" className="text-gray-400 hover:text-[#3a5b5e] transition-colors"><Calculator size={20} /></Link>
+          <Link href="/shop-clearing" className="text-[#3a5b5e]"><ShoppingCart size={20} /></Link>
         </nav>
       </div>
+
+      {/* --- MODALS --- */}
+      
+      {/* Add User Modal */}
+      {showAddUser && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[300] flex justify-center items-end sm:items-center">
+          <div className="bg-white w-full max-w-md rounded-t-[2rem] sm:rounded-[2rem] p-6 animate-in slide-in-from-bottom-8">
+            <div className="flex justify-between items-center mb-6">
+              <h3 className="text-lg font-black tracking-tight">New Customer</h3>
+              <button onClick={() => setShowAddUser(false)} className="bg-gray-100 p-2 rounded-full text-gray-500 hover:bg-gray-200"><X size={16}/></button>
+            </div>
+            <div className="space-y-3 mb-6">
+              <input type="text" placeholder="Full Name" value={newHostName} onChange={e => setNewHostName(e.target.value)} className="w-full bg-gray-50 border-none p-4 rounded-2xl font-bold focus:ring-2 focus:ring-[#5fa4ad]" />
+              <input type="text" placeholder="Host No. / ID" value={newHostNo} onChange={e => setNewHostNo(e.target.value)} className="w-full bg-gray-50 border-none p-4 rounded-2xl font-bold focus:ring-2 focus:ring-[#5fa4ad]" />
+            </div>
+            <button onClick={handleAddCustomer} className="w-full bg-[#3a5b5e] text-white p-4 rounded-2xl font-black uppercase tracking-widest shadow-lg active:scale-95 transition-transform">Save Customer</button>
+          </div>
+        </div>
+      )}
+
+      {/* Manage Banks Modal */}
+      {showBanks && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[300] flex justify-center items-end sm:items-center">
+          <div className="bg-white w-full max-w-md rounded-t-[2rem] sm:rounded-[2rem] p-6 animate-in slide-in-from-bottom-8 max-h-[80vh] overflow-y-auto">
+            <div className="flex justify-between items-center mb-6">
+              <h3 className="text-lg font-black tracking-tight">Deposit Accounts</h3>
+              <button onClick={() => setShowBanks(false)} className="bg-gray-100 p-2 rounded-full text-gray-500 hover:bg-gray-200"><X size={16}/></button>
+            </div>
+            
+            <div className="flex gap-2 mb-6">
+              <input type="text" placeholder="Bank Name" value={newBankName} onChange={e => setNewBankName(e.target.value)} className="w-1/2 bg-gray-50 border-none p-3 rounded-xl text-sm font-bold focus:ring-2 focus:ring-[#5fa4ad]" />
+              <input type="text" placeholder="Account No." value={newBankNo} onChange={e => setNewBankNo(e.target.value)} className="w-1/2 bg-gray-50 border-none p-3 rounded-xl text-sm font-bold focus:ring-2 focus:ring-[#5fa4ad]" />
+              <button onClick={handleAddBank} className="bg-[#3a5b5e] text-white px-4 rounded-xl active:scale-95 transition-transform"><Plus size={16}/></button>
+            </div>
+
+            <div className="space-y-2">
+              {banks.length === 0 && <p className="text-xs text-gray-400 italic text-center py-4">No bank accounts added.</p>}
+              {banks.map(bank => (
+                <div key={bank.id} className="flex justify-between items-center bg-gray-50 p-3 rounded-xl">
+                  <div>
+                    <p className="text-xs font-bold text-[#364d54]">{bank.account_name}</p>
+                    <p className="text-[10px] text-gray-400 font-mono">{bank.account_number}</p>
+                  </div>
+                  <button onClick={() => handleDeleteBank(bank.id)} className="text-red-400 p-2 hover:text-red-600 transition-colors"><Trash2 size={16}/></button>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
     </main>
   );
 }
