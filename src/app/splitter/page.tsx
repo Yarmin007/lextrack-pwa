@@ -5,7 +5,7 @@ import { supabase } from "@/lib/supabase";
 import { 
   Utensils, Navigation, Plus, X, Trash2, Wallet, 
   ShoppingCart, ReceiptText, Calculator, Settings, 
-  PieChart, CheckCircle2, AlertCircle, ChevronDown, ChevronUp, Send, User, Landmark, Banknote
+  PieChart, CheckCircle2, AlertCircle, ChevronDown, ChevronUp, Send, User, Landmark, Banknote, Users, Edit2, Package
 } from "lucide-react";
 import Link from "next/link";
 
@@ -39,6 +39,17 @@ export default function SplitterPage() {
   // Local Shared Statuses (Maps person -> last shared total amount)
   const [sharedStatuses, setSharedStatuses] = useState<Record<string, number>>({});
 
+  // Directory State
+  const [directory, setDirectory] = useState<{id: string, name: string, nickname: string}[]>([]);
+  const [showDirModal, setShowDirModal] = useState(false);
+  const [dirName, setDirName] = useState("");
+  const [dirNick, setDirNick] = useState("");
+  const [editingDirId, setEditingDirId] = useState<string | null>(null);
+
+  // Details Tile State & Dropdown State
+  const [expandedPerson, setExpandedPerson] = useState<string | null>(null);
+  const [focusedParticipantId, setFocusedParticipantId] = useState<string | null>(null);
+
   const showToast = (message: string, type: 'success' | 'error' = 'success') => {
     setToast({ message, type });
     setTimeout(() => setToast(null), 3000);
@@ -70,17 +81,20 @@ export default function SplitterPage() {
           mode: e.mode,
           totalBill: e.total_bill?.toString() || "",
           delivery: e.delivery_fee?.toString() || "",
+          gst: e.gst?.toString() || "",
+          discount: e.discount?.toString() || "",
+          invoiceItems: e.invoice_items || [],
           participants: (e.participants || []).map((p: any) => {
             let mergedItems = p.items || [];
             if (mergedItems.length === 0 && p.amount) {
-              mergedItems = [{ id: getSafeId(undefined), desc: "Food", price: p.amount }];
+              mergedItems = [{ id: getSafeId(undefined), desc: "Food", price: p.amount, qty: 1 }];
             }
             return {
               ...p,
               id: getSafeId(p.id),
               paysMain: p.paysMain !== undefined ? p.paysMain : (p.isIncluded !== false), 
               paysDelivery: p.paysDelivery !== undefined ? p.paysDelivery : (p.isIncluded !== false),
-              items: mergedItems.map((item: any) => ({ ...item, id: getSafeId(item.id) }))
+              items: mergedItems.map((item: any) => ({ ...item, id: getSafeId(item.id), qty: item.qty || 1 }))
             };
           })
         }));
@@ -101,6 +115,9 @@ export default function SplitterPage() {
 
     const savedStatuses = localStorage.getItem("lextrack_shared_statuses");
     if (savedStatuses) setSharedStatuses(JSON.parse(savedStatuses));
+
+    const savedDir = localStorage.getItem("lextrack_directory");
+    if (savedDir) setDirectory(JSON.parse(savedDir));
   }, []);
 
   const saveMvrBank = () => {
@@ -109,6 +126,59 @@ export default function SplitterPage() {
     localStorage.setItem("lextrack_mvr_bank_no", mvrBankNo);
     setShowBankModal(false);
     showToast("MVR Bank saved successfully!");
+  };
+
+  const saveToDirectory = () => {
+    if (!dirName.trim()) return showToast("Name is required", "error");
+    
+    if (editingDirId) {
+      const next = directory.map(d => d.id === editingDirId ? { ...d, name: dirName.trim(), nickname: dirNick.trim() } : d);
+      setDirectory(next);
+      localStorage.setItem("lextrack_directory", JSON.stringify(next));
+      setEditingDirId(null);
+      showToast("User updated in directory");
+    } else {
+      const newEntry = { id: generateId(), name: dirName.trim(), nickname: dirNick.trim() };
+      const next = [...directory, newEntry];
+      setDirectory(next);
+      localStorage.setItem("lextrack_directory", JSON.stringify(next));
+      showToast("User added to directory");
+    }
+    setDirName("");
+    setDirNick("");
+  };
+
+  const extractUsers = () => {
+    const existingNames = new Set(directory.map(d => d.name.trim().toLowerCase()));
+    let added = 0;
+    const nextDir = [...directory];
+    
+    events.forEach(ev => {
+      ev.participants.forEach((p: any) => {
+        if (p.name && p.name.trim()) {
+          const key = p.name.trim().toLowerCase();
+          if (!existingNames.has(key)) {
+            existingNames.add(key);
+            nextDir.push({ id: generateId(), name: p.name.trim(), nickname: "" });
+            added++;
+          }
+        }
+      });
+    });
+
+    if (added > 0) {
+      setDirectory(nextDir);
+      localStorage.setItem("lextrack_directory", JSON.stringify(nextDir));
+      showToast(`Extracted ${added} new users!`);
+    } else {
+      showToast("No new users found to extract.");
+    }
+  };
+
+  const deleteFromDirectory = (id: string) => {
+    const next = directory.filter(d => d.id !== id);
+    setDirectory(next);
+    localStorage.setItem("lextrack_directory", JSON.stringify(next));
   };
 
   // --- STRICT ID-BASED STATE UPDATERS ---
@@ -122,6 +192,9 @@ export default function SplitterPage() {
       mode: 'universal',
       totalBill: "",
       delivery: "",
+      gst: "",
+      discount: "",
+      invoiceItems: [],
       participants: [{ id: generateId(), name: "", items: [], hasPaid: false, paysMain: true, paysDelivery: true }]
     };
     setEvents(prev => sortEventsDesc([newEvent, ...prev]));
@@ -129,37 +202,123 @@ export default function SplitterPage() {
   };
 
   const updateEvent = (eventId: string, field: string, value: any) => { setEvents(prev => prev.map(e => e.id === eventId ? { ...e, [field]: value } : e)); };
+  
+  // --- INVOICE MASTER LOGIC ---
+  const addInvoiceItem = (eventId: string) => {
+    setEvents(prev => prev.map(e => e.id === eventId ? { ...e, invoiceItems: [...(e.invoiceItems || []), { id: generateId(), desc: "", qty: 1, price: "" }] } : e));
+  };
+  const updateInvoiceItem = (eventId: string, invId: string, field: string, value: any) => {
+    setEvents(prev => prev.map(e => e.id === eventId ? { ...e, invoiceItems: (e.invoiceItems || []).map((inv:any) => inv.id === invId ? { ...inv, [field]: value } : inv) } : e));
+  };
+  const removeInvoiceItem = (eventId: string, invId: string) => {
+    setEvents(prev => prev.map(e => e.id === eventId ? { ...e, invoiceItems: (e.invoiceItems || []).filter((inv:any) => inv.id !== invId) } : e));
+  };
+  
+  const moveUnclaimedToShared = (eventId: string) => {
+    const ev = events.find(e => e.id === eventId);
+    if (!ev) return;
+    
+    const masterSubtotal = (ev.invoiceItems || []).reduce((sum: number, inv: any) => sum + ((parseFloat(inv.qty)||0) * (parseFloat(inv.price)||0)), 0);
+    
+    let claimedSubtotal = 0;
+    ev.participants.forEach((p: any) => {
+      claimedSubtotal += (p.items || []).reduce((sum: number, item: any) => sum + ((parseFloat(item.price) || 0) * (parseFloat(item.qty) || 1)), 0);
+    });
+
+    let unclaimed = masterSubtotal - claimedSubtotal;
+    if (unclaimed < 0) unclaimed = 0;
+
+    updateEvent(eventId, 'totalBill', unclaimed.toFixed(2));
+    showToast(`MVR ${unclaimed.toFixed(2)} unassigned moved to Shared Items!`);
+  };
+
   const addParticipant = (eventId: string) => { setEvents(prev => prev.map(e => e.id === eventId ? { ...e, participants: [...e.participants, { id: generateId(), name: "", items: [], hasPaid: false, paysMain: true, paysDelivery: true }] } : e)); };
   const removeParticipant = (eventId: string, pId: string) => { setEvents(prev => prev.map(e => e.id === eventId ? { ...e, participants: e.participants.filter((p:any) => p.id !== pId) } : e)); };
   const updateParticipant = (eventId: string, pId: string, field: string, value: any) => { setEvents(prev => prev.map(e => e.id === eventId ? { ...e, participants: e.participants.map((p:any) => p.id === pId ? { ...p, [field]: value } : p) } : e)); };
-  const addParticipantItem = (eventId: string, pId: string) => { setEvents(prev => prev.map(e => e.id === eventId ? { ...e, participants: e.participants.map((p:any) => p.id === pId ? { ...p, items: [...(p.items || []), { id: generateId(), desc: "", price: "" }] } : p) } : e)); };
-  const updateParticipantItem = (eventId: string, pId: string, itemId: string, field: string, value: string) => { setEvents(prev => prev.map(e => e.id === eventId ? { ...e, participants: e.participants.map((p:any) => p.id === pId ? { ...p, items: (p.items || []).map((it:any) => it.id === itemId ? { ...it, [field]: value } : it) } : p) } : e)); };
+  const addParticipantItem = (eventId: string, pId: string) => { setEvents(prev => prev.map(e => e.id === eventId ? { ...e, participants: e.participants.map((p:any) => p.id === pId ? { ...p, items: [...(p.items || []), { id: generateId(), desc: "", qty: 1, price: "" }] } : p) } : e)); };
+  
+  const updateParticipantItem = (eventId: string, pId: string, itemId: string, field: string, value: string) => { 
+    setEvents(prev => prev.map(e => {
+      if (e.id !== eventId) return e;
+      
+      let autoPrice: string | null = null;
+      if (field === 'desc') {
+        const matchedInv = (e.invoiceItems || []).find((inv: any) => inv.desc.toLowerCase() === value.toLowerCase());
+        if (matchedInv) autoPrice = matchedInv.price;
+      }
+
+      return { 
+        ...e, 
+        participants: e.participants.map((p:any) => p.id === pId ? { 
+          ...p, 
+          items: (p.items || []).map((it:any) => {
+            if (it.id !== itemId) return it;
+            const nextIt = { ...it, [field]: value };
+            if (autoPrice !== null) nextIt.price = autoPrice;
+            return nextIt;
+          }) 
+        } : p) 
+      };
+    })); 
+  };
+  
   const removeParticipantItem = (eventId: string, pId: string, itemId: string) => { setEvents(prev => prev.map(e => e.id === eventId ? { ...e, participants: e.participants.map((p:any) => p.id === pId ? { ...p, items: (p.items || []).filter((it:any) => it.id !== itemId) } : p) } : e)); };
+
+  const markAsPaidFromTile = async (eventId: string, participantId: string) => {
+    const ev = events.find(e => e.id === eventId);
+    if (!ev) return;
+    
+    const updatedParticipants = ev.participants.map((p: any) => 
+      p.id === participantId ? { ...p, hasPaid: true } : p
+    );
+    
+    setEvents(prev => prev.map(e => e.id === eventId ? { ...e, participants: updatedParticipants } : e));
+    
+    const participantsWithShares = updatedParticipants.map((p: any) => ({
+      ...p,
+      share: calculateShare({ ...ev, participants: updatedParticipants }, p)
+    }));
+
+    const payload = {
+      id: ev.id,
+      title: ev.title,
+      event_date: ev.date,
+      mode: ev.mode,
+      total_bill: parseFloat(ev.totalBill) || 0,
+      delivery_fee: parseFloat(ev.delivery) || 0,
+      gst: parseFloat(ev.gst) || 0,
+      discount: parseFloat(ev.discount) || 0,
+      invoice_items: ev.invoiceItems || [],
+      participants: participantsWithShares
+    };
+
+    const { error } = await supabase.from('splitter_events').upsert(payload);
+    
+    if (!error) {
+      showToast("Marked as paid!");
+    } else {
+      showToast("Error saving to cloud", "error");
+      setEvents(prev => prev.map(e => e.id === eventId ? ev : e));
+    }
+  };
 
   // --- FIX: DATABASE-BACKED ADJUSTMENTS ---
   const addAdjustment = async (personName: string) => {
     const key = personName.trim().toLowerCase();
     const newAdj = { id: generateId(), person_name: key, type: 'payment', desc_text: "", amount: 0 }; 
     
-    // Update screen instantly
     setAdjustments(prev => Array.isArray(prev) ? [...prev, newAdj] : [newAdj]);
-    
-    // Save to DB
     const { error } = await supabase.from('splitter_adjustments').insert(newAdj);
     if (error) showToast("Error connecting to DB", "error");
   };
 
-  // Instantly updates the screen while typing
   const updateAdjustmentLocal = (id: string, field: string, value: any) => {
     setAdjustments(prev => prev.map(a => a.id === id ? { ...a, [field]: value } : a));
   };
 
-  // Saves to Supabase cleanly when you finish typing
   const saveAdjustmentDB = async (id: string, field: string, value: any) => {
     let finalValue = value;
-    // Postgres requires a real number, empty string causes a crash
     if (field === 'amount') finalValue = parseFloat(value) || 0; 
-
     const { error } = await supabase.from('splitter_adjustments').update({ [field]: finalValue }).eq('id', id);
     if (error) showToast("Failed to save to cloud", "error");
   };
@@ -170,26 +329,39 @@ export default function SplitterPage() {
     if (error) showToast("Failed to delete", "error");
   };
 
-  // --- UNIVERSAL MATH ENGINE ---
+  // --- REBUILT MATH ENGINE (PRO-RATA GST/DISCOUNT & ISOLATED SHARED ITEMS) ---
   const calculateShare = (event: any, participant: any) => {
-    let total = 0;
-    
+    let subtotal = 0;
+
+    // 1. Personal Items Subtotal
+    subtotal += (participant.items || []).reduce((sum: number, item: any) => sum + ((parseFloat(item.price) || 0) * (parseFloat(item.qty) || 1)), 0);
+
+    // 2. Extra Shared Amount (from the explicit totalBill field)
+    const mainCount = Math.max(1, event.participants.filter((p: any) => p.paysMain !== false).length);
     if (participant.paysMain !== false) {
-      const mainCount = Math.max(1, event.participants.filter((p: any) => p.paysMain !== false).length);
-      const billNum = parseFloat(event.totalBill) || 0;
-      total += (billNum / mainCount);
+      const sharedNum = parseFloat(event.totalBill) || 0;
+      subtotal += (sharedNum / mainCount);
     }
 
+    // 3. Apply GST to their specific portion
+    const gstPercent = parseFloat(event.gst) || 0;
+    const gstAmount = subtotal * (gstPercent / 100);
+    let total = subtotal + gstAmount;
+
+    // 4. Delivery Fee (Usually no GST on delivery)
     if (participant.paysDelivery !== false) {
       const devCount = Math.max(1, event.participants.filter((p: any) => p.paysDelivery !== false).length);
       const deliveryNum = parseFloat(event.delivery) || 0;
       total += (deliveryNum / devCount);
     }
 
-    const itemsTotal = (participant.items || []).reduce((sum: number, item: any) => sum + (parseFloat(item.price) || 0), 0);
-    total += itemsTotal;
+    // 5. Discount (Split equally among main payers)
+    if (participant.paysMain !== false) {
+      const discountNum = parseFloat(event.discount) || 0;
+      total -= (discountNum / mainCount);
+    }
 
-    return total;
+    return Math.max(0, total);
   };
 
   const saveEvent = async (eventId: string) => {
@@ -202,18 +374,20 @@ export default function SplitterPage() {
     }));
 
     const payload = {
-      id: ev.id, // Using the valid UUID
+      id: ev.id,
       title: ev.title,
       event_date: ev.date,
       mode: 'universal',
       total_bill: parseFloat(ev.totalBill) || 0,
       delivery_fee: parseFloat(ev.delivery) || 0,
+      gst: parseFloat(ev.gst) || 0,
+      discount: parseFloat(ev.discount) || 0,
+      invoice_items: ev.invoiceItems || [],
       participants: participantsWithShares
     };
 
     let updatedEvents = [...events];
 
-    // Upsert safely handles both new and existing events
     const { data, error } = await supabase.from('splitter_events').upsert(payload).select().single();
     
     if (!error && data) { 
@@ -244,14 +418,23 @@ export default function SplitterPage() {
     events.forEach(ev => {
       const mainCount = Math.max(1, ev.participants.filter((p: any) => p.paysMain !== false).length);
       const devCount = Math.max(1, ev.participants.filter((p: any) => p.paysDelivery !== false).length);
-      
-      const billSplit = (parseFloat(ev.totalBill) || 0) / mainCount;
-      const deliverySplit = (parseFloat(ev.delivery) || 0) / devCount;
 
       ev.participants.forEach((p: any) => {
-        if (!p.hasPaid && p.name && p.name.trim() !== "") {
-          const key = p.name.trim().toLowerCase();
+        const key = p.name?.trim().toLowerCase();
+        
+        // --- EXCLUDE YAMIN ---
+        if (key === 'yamin' || key === 'abdulla yamin') return; 
+
+        if (!p.hasPaid && key) {
           const share = calculateShare(ev, p);
+
+          // Calculate precise breakdown for WA invoice
+          const itemsSubtotal = (p.items || []).reduce((sum: number, item: any) => sum + ((parseFloat(item.price) || 0) * (parseFloat(item.qty) || 1)), 0);
+          const sharedSubtotal = p.paysMain !== false ? (parseFloat(ev.totalBill) || 0) / mainCount : 0;
+          const gstPercent = parseFloat(ev.gst) || 0;
+          const gstAmount = (itemsSubtotal + sharedSubtotal) * (gstPercent / 100);
+          const discountShare = p.paysMain !== false ? (parseFloat(ev.discount) || 0) / mainCount : 0;
+          const deliverySplit = p.paysDelivery !== false ? (parseFloat(ev.delivery) || 0) / devCount : 0;
 
           if (!personMap[key]) {
             personMap[key] = { name: p.name.trim(), totalOwed: 0, details: [] };
@@ -259,13 +442,19 @@ export default function SplitterPage() {
 
           personMap[key].totalOwed += share;
           personMap[key].details.push({
+            eventId: ev.id,
+            participantId: p.id,
             title: ev.title,
             date: ev.date,
             mode: ev.mode,
             share: share,
             items: p.items || [],
-            billSplit: p.paysMain !== false ? billSplit : 0,
-            deliverySplit: p.paysDelivery !== false ? deliverySplit : 0,
+            itemsSubtotal,
+            sharedSubtotal,
+            gstPercent,
+            gstAmount,
+            discountShare,
+            deliverySplit,
             paysMain: p.paysMain !== false
           });
         }
@@ -281,10 +470,8 @@ export default function SplitterPage() {
     const today = new Date();
     const formattedDate = `${String(today.getDate()).padStart(2, '0')}/${String(today.getMonth() + 1).padStart(2, '0')}/${today.getFullYear()}`;
 
-    // Exact Format Requested
     let msg = `*INVOICE*\nBill To: ${person.name.toUpperCase()}\nBill Date: ${formattedDate}\n\n`;
 
-    // Sort chronologically (oldest first)
     const sortedDetails = [...person.details].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
     if (sortedDetails.length > 0) {
@@ -294,16 +481,14 @@ export default function SplitterPage() {
         
         d.items.forEach((item: any) => {
           if (item.desc || item.price) {
-            msg += `   └ ${item.desc || "Item"}: ${item.price || 0}\n`;
+            msg += `   └ ${item.desc || "Item"} (x${item.qty || 1}): ${((parseFloat(item.price)||0)*(parseFloat(item.qty)||1)).toFixed(2)}\n`;
           }
         });
 
-        if (d.billSplit > 0) {
-          msg += `   └ Shared Bill: ${d.billSplit.toFixed(2)}\n`;
-        }
-        if (d.deliverySplit > 0) {
-          msg += `   └ Delivery Fee: ${d.deliverySplit.toFixed(2)}\n`;
-        }
+        if (d.sharedSubtotal > 0) msg += `   └ Shared Items: ${d.sharedSubtotal.toFixed(2)}\n`;
+        if (d.gstAmount > 0) msg += `   └ GST (${d.gstPercent}%): +${d.gstAmount.toFixed(2)}\n`;
+        if (d.deliverySplit > 0) msg += `   └ Delivery Fee: +${d.deliverySplit.toFixed(2)}\n`;
+        if (d.discountShare > 0) msg += `   └ Discount: -${d.discountShare.toFixed(2)}\n`;
 
         if (d.share === 0 && d.items.length === 0) {
           msg += `   └ (Exempt from Event)\n`;
@@ -333,7 +518,6 @@ export default function SplitterPage() {
 
     window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, "_blank");
     
-    // Save the status so the button turns green indicating it's been shared
     const personKey = person.name.trim().toLowerCase();
     setSharedStatuses(prev => {
       const next = { ...prev, [personKey]: finalTotal };
@@ -348,6 +532,10 @@ export default function SplitterPage() {
 
   events.forEach(ev => {
     ev.participants.forEach((p: any) => {
+      const key = p.name?.trim().toLowerCase();
+      // EXCLUDE YAMIN
+      if (key === 'yamin' || key === 'abdulla yamin') return; 
+
       const share = calculateShare(ev, p);
       if (p.hasPaid) globalTotalCollected += share; else globalTotalOwed += share;
     });
@@ -356,10 +544,12 @@ export default function SplitterPage() {
   const safeAdjustments = Array.isArray(adjustments) ? adjustments : [];
   
   safeAdjustments.forEach(adj => {
+    if (adj.person_name === 'yamin' || adj.person_name === 'abdulla yamin') return; 
+
     const amt = parseFloat(adj.amount) || 0;
     if (adj.type === 'payment') {
       globalTotalCollected += amt;
-      globalTotalOwed -= amt; // Deducted because they paid us
+      globalTotalOwed -= amt; 
     } else if (adj.type === 'charge') {
       globalTotalOwed += amt;
     }
@@ -369,7 +559,7 @@ export default function SplitterPage() {
 
   return (
     <main className="min-h-screen bg-[#F0F4F8] text-[#364d54] font-sans flex relative">
-      
+
       {toast && (
         <div className={`fixed top-6 right-1/2 translate-x-1/2 lg:translate-x-0 lg:right-6 z-[400] px-6 py-4 rounded-2xl shadow-2xl flex items-center gap-3 text-sm font-bold animate-in fade-in slide-in-from-top-5 duration-300 ${toast.type === 'success' ? 'bg-[#3a5b5e] text-white' : 'bg-red-500 text-white'}`}>
           {toast.type === 'success' ? <CheckCircle2 size={20} /> : <AlertCircle size={20} />}
@@ -400,6 +590,9 @@ export default function SplitterPage() {
               <p className="text-[10px] font-bold text-[#A0AEC0] uppercase tracking-widest mt-1">Universal Group Splitter</p>
             </div>
             <div className="flex gap-2 w-full sm:w-auto">
+              <button onClick={() => setShowDirModal(true)} className="flex-1 sm:flex-none h-12 px-4 rounded-2xl bg-white border border-[#E0E7E9] text-[#364d54] font-black text-xs uppercase tracking-widest shadow-sm flex items-center justify-center gap-2 active:scale-95 transition-transform">
+                <Users size={16}/> Directory
+              </button>
               <button onClick={() => setShowBankModal(true)} className="flex-1 sm:flex-none h-12 px-4 rounded-2xl bg-white border border-[#E0E7E9] text-[#364d54] font-black text-xs uppercase tracking-widest shadow-sm flex items-center justify-center gap-2 active:scale-95 transition-transform">
                 <Landmark size={16}/> MVR Bank
               </button>
@@ -429,14 +622,11 @@ export default function SplitterPage() {
                 {pendingPeople.map((person, idx) => {
                   const personKey = person.name.trim().toLowerCase();
                   
-                  // DB Backed Adjustments Math
                   const personAdjs = safeAdjustments.filter(a => a.person_name === personKey);
                   const chargeTotal = personAdjs.filter(a => a.type === 'charge').reduce((s, a) => s + (parseFloat(a.amount) || 0), 0);
                   const paymentTotal = personAdjs.filter(a => a.type === 'payment').reduce((s, a) => s + (parseFloat(a.amount) || 0), 0);
                   
                   const finalTotal = person.totalOwed + chargeTotal - paymentTotal;
-                  
-                  // Button Logic: Only green if the finalTotal matches what was last shared
                   const isShared = sharedStatuses[personKey] === finalTotal;
 
                   return (
@@ -455,7 +645,33 @@ export default function SplitterPage() {
                         </div>
                       </div>
 
-                      {/* ADJUSTMENTS MANAGER */}
+                      <button onClick={() => setExpandedPerson(expandedPerson === personKey ? null : personKey)} className="text-[10px] font-bold text-[#5fa4ad] mb-3 flex items-center gap-1 uppercase tracking-widest active:scale-95 transition-transform">
+                        {expandedPerson === personKey ? <ChevronUp size={14}/> : <ChevronDown size={14}/>}
+                        {expandedPerson === personKey ? "Hide Details" : "View Details"}
+                      </button>
+
+                      {expandedPerson === personKey && (
+                        <div className="mb-4 bg-gray-50 p-3 rounded-xl border border-gray-100 space-y-3">
+                          {person.details.map((d: any, dIdx: number) => (
+                            <div key={dIdx} className="flex justify-between items-center border-b border-gray-100 pb-2 last:border-0 last:pb-0">
+                              <div>
+                                <p className="font-bold text-[11px] text-[#364d54] uppercase">{d.title}</p>
+                                <p className="text-[9px] text-[#A0AEC0] font-black">{d.date}</p>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <span className="font-black text-orange-500 text-xs">MVR {d.share.toFixed(0)}</span>
+                                <button 
+                                  onClick={() => markAsPaidFromTile(d.eventId, d.participantId)}
+                                  className="bg-green-100 text-green-600 px-2 py-1.5 rounded-lg font-black text-[9px] uppercase tracking-widest hover:bg-green-200 active:scale-95 transition-transform"
+                                >
+                                  Pay
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
                       <div className="mb-4 bg-gray-50 p-3 rounded-xl border border-gray-100">
                         <div className="flex justify-between items-center mb-2">
                           <span className="text-[9px] font-black uppercase tracking-widest text-[#A0AEC0]">Adjustments</span>
@@ -525,6 +741,11 @@ export default function SplitterPage() {
               const collected = ev.participants.filter((p:any) => p.hasPaid).reduce((s: number, p: any) => s + calculateShare(ev, p), 0);
               const isFullyPaid = collected >= eventTotal && eventTotal > 0;
 
+              const masterSubtotal = (ev.invoiceItems || []).reduce((sum: number, inv: any) => sum + ((parseFloat(inv.qty)||0) * (parseFloat(inv.price)||0)), 0);
+              const masterGST = masterSubtotal * ((parseFloat(ev.gst)||0)/100);
+              const masterDisc = parseFloat(ev.discount) || 0;
+              const masterGrandTotal = masterSubtotal + masterGST - masterDisc;
+
               return (
                 <div key={ev.id} className={`bg-white rounded-[2rem] border border-[#E0E7E9] shadow-sm transition-all duration-300 ${isExpanded ? 'ring-2 ring-[#5fa4ad]/20' : ''}`}>
                   
@@ -555,6 +776,68 @@ export default function SplitterPage() {
                   {isExpanded && (
                     <div className="p-5 border-t border-[#E0E7E9] bg-[#F8FAFB] rounded-b-[2rem]">
                       
+                      {/* MASTER INVOICE SECTION */}
+                      <div className="bg-white rounded-2xl border border-[#E0E7E9] overflow-hidden mb-6 shadow-sm">
+                        <div className="flex justify-between items-center p-4 border-b border-[#E0E7E9] bg-[#F0F4F8]">
+                          <div className="flex items-center gap-2">
+                            <Package size={16} className="text-[#5fa4ad]"/>
+                            <h4 className="text-[10px] font-black uppercase text-[#364d54] tracking-widest">Master Invoice</h4>
+                            <span className="ml-2 text-[9px] font-black text-[#5fa4ad] bg-white px-2 py-1 rounded-md border border-[#E0E7E9]">Grand Total: {masterGrandTotal.toFixed(2)} MVR</span>
+                          </div>
+                          <button onClick={() => addInvoiceItem(ev.id)} className="text-[#5fa4ad] font-bold text-[10px] uppercase flex items-center gap-1 bg-white px-3 py-1.5 rounded-lg active:scale-95 transition-transform border border-[#E0E7E9]">
+                            <Plus size={12}/> Add Master Item
+                          </button>
+                        </div>
+                        
+                        <div className="p-4 space-y-3">
+                          {(ev.invoiceItems || []).map((inv: any) => (
+                            <div key={inv.id} className="flex gap-2 items-center">
+                              <input type="text" placeholder="Item Name (e.g. Adult Jersey)" value={inv.desc} onChange={e => updateInvoiceItem(ev.id, inv.id, 'desc', e.target.value)} className="flex-grow bg-gray-50 border-none p-3 rounded-xl text-sm font-bold focus:ring-2 focus:ring-[#5fa4ad]"/>
+                              <input type="number" placeholder="Qty" value={inv.qty} onChange={e => updateInvoiceItem(ev.id, inv.id, 'qty', e.target.value)} className="w-20 bg-gray-50 border-none p-3 rounded-xl text-sm font-bold text-center focus:ring-2 focus:ring-[#5fa4ad]"/>
+                              <input type="number" placeholder="Price/ea" value={inv.price} onChange={e => updateInvoiceItem(ev.id, inv.id, 'price', e.target.value)} className="w-28 bg-gray-50 border-none p-3 rounded-xl text-sm font-bold focus:ring-2 focus:ring-[#5fa4ad]"/>
+                              <button onClick={() => removeInvoiceItem(ev.id, inv.id)} className="text-gray-300 hover:text-red-400 p-2"><Trash2 size={16}/></button>
+                            </div>
+                          ))}
+
+                          <div className="flex flex-wrap sm:flex-nowrap gap-4 border-t border-[#E0E7E9] pt-4 mt-2">
+                            <div className="flex flex-col w-full sm:w-1/3">
+                              <label className="text-[9px] font-black uppercase tracking-widest text-[#A0AEC0] mb-1 pl-1">GST (%)</label>
+                              <input type="number" value={ev.gst} onChange={e => updateEvent(ev.id, 'gst', e.target.value)} className="bg-gray-50 border-none p-3 rounded-xl font-bold focus:ring-2 focus:ring-[#5fa4ad]" placeholder="0"/>
+                            </div>
+                            <div className="flex flex-col w-full sm:w-1/3">
+                              <label className="text-[9px] font-black uppercase tracking-widest text-[#A0AEC0] mb-1 pl-1">Discount (MVR)</label>
+                              <input type="number" value={ev.discount} onChange={e => updateEvent(ev.id, 'discount', e.target.value)} className="bg-gray-50 border-none p-3 rounded-xl font-bold focus:ring-2 focus:ring-[#5fa4ad]" placeholder="0"/>
+                            </div>
+                            <div className="flex flex-col w-full sm:w-1/3 justify-end">
+                              <button onClick={() => moveUnclaimedToShared(ev.id)} className="w-full h-[44px] bg-[#e0f2fe] text-[#0284c7] border border-blue-100 rounded-xl font-black text-[10px] uppercase tracking-widest shadow-sm hover:bg-blue-100 active:scale-95 transition-transform flex items-center justify-center gap-2">
+                                <Calculator size={14}/> Add Unclaimed to Shared
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* BALANCE CHECKER */}
+                        {(ev.invoiceItems || []).length > 0 && (
+                          <div className="bg-orange-50/50 p-4 border-t border-orange-100/50">
+                            <h5 className="text-[9px] font-black uppercase tracking-widest text-orange-500 mb-3">Inventory Balance Checker</h5>
+                            <div className="space-y-2">
+                              {ev.invoiceItems.map((inv: any) => {
+                                const claimed = ev.participants.reduce((sum: number, p: any) => sum + (p.items || []).filter((i: any) => i.desc.trim().toLowerCase() === inv.desc.trim().toLowerCase()).reduce((s: number, i: any) => s + (parseFloat(i.qty) || 1), 0), 0);
+                                const remaining = (parseFloat(inv.qty) || 0) - claimed;
+                                return (
+                                  <div key={inv.id} className="flex justify-between items-center text-xs font-bold text-[#364d54] bg-white p-2.5 rounded-lg shadow-sm border border-orange-100/50">
+                                    <span>{inv.desc || "Unnamed Item"} (Total: {inv.qty || 0})</span>
+                                    <span className={`px-2 py-1 rounded-md text-[9px] uppercase tracking-widest ${remaining < 0 ? 'bg-red-100 text-red-600' : remaining === 0 ? 'bg-green-100 text-green-600' : 'bg-orange-100 text-orange-600'}`}>
+                                      {remaining === 0 ? 'All Claimed ✅' : remaining < 0 ? `Over-claimed by ${Math.abs(remaining)}` : `${remaining} left`}
+                                    </span>
+                                  </div>
+                                )
+                              })}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
                         <div className="flex flex-col">
                           <label className="text-[9px] font-black uppercase tracking-widest text-[#A0AEC0] mb-1 pl-1">Event Title</label>
@@ -567,11 +850,11 @@ export default function SplitterPage() {
                         
                         <div className="flex gap-2">
                           <div className="flex flex-col w-1/2">
-                            <label className="text-[9px] font-black uppercase tracking-widest text-blue-500 mb-1 pl-1">Shared Bill</label>
+                            <label className="text-[9px] font-black uppercase tracking-widest text-blue-500 mb-1 pl-1">Shared Items (Equally)</label>
                             <input type="number" value={ev.totalBill} onChange={e => updateEvent(ev.id, 'totalBill', e.target.value)} className="bg-white border-none p-3 rounded-xl font-bold focus:ring-2 focus:ring-blue-400 text-blue-600" placeholder="0"/>
                           </div>
                           <div className="flex flex-col w-1/2">
-                            <label className="text-[9px] font-black uppercase tracking-widest text-orange-400 mb-1 pl-1">Shared Fee/Deliv</label>
+                            <label className="text-[9px] font-black uppercase tracking-widest text-orange-400 mb-1 pl-1">Delivery/Fees (Equally)</label>
                             <input type="number" value={ev.delivery} onChange={e => updateEvent(ev.id, 'delivery', e.target.value)} className="bg-white border-none p-3 rounded-xl font-bold focus:ring-2 focus:ring-orange-400 text-orange-600" placeholder="0"/>
                           </div>
                         </div>
@@ -595,7 +878,37 @@ export default function SplitterPage() {
                                 <div className="flex flex-wrap sm:flex-nowrap items-center gap-2">
                                   <div className="w-6 h-6 rounded-full bg-gray-100 flex items-center justify-center text-[10px] font-bold text-gray-400 flex-shrink-0">P</div>
                                   
-                                  <input type="text" placeholder="Name" value={p.name} onChange={e => updateParticipant(ev.id, p.id, "name", e.target.value)} className="flex-grow min-w-[80px] bg-transparent border-none focus:ring-0 font-bold text-sm p-0"/>
+                                  <div className="relative flex-grow min-w-[80px]">
+                                    <input 
+                                      type="text" 
+                                      placeholder="Name" 
+                                      value={p.name} 
+                                      onChange={e => {
+                                        updateParticipant(ev.id, p.id, "name", e.target.value);
+                                        setFocusedParticipantId(p.id);
+                                      }} 
+                                      onFocus={() => setFocusedParticipantId(p.id)}
+                                      onBlur={() => setTimeout(() => setFocusedParticipantId(null), 200)}
+                                      className="w-full bg-transparent border-none focus:ring-0 font-bold text-sm p-0"
+                                    />
+                                    {focusedParticipantId === p.id && directory.length > 0 && (
+                                      <div className="absolute top-full left-0 mt-2 w-48 bg-white border border-[#E0E7E9] shadow-2xl rounded-xl z-50 max-h-48 overflow-y-auto">
+                                        {directory.filter(user => user.name.toLowerCase().includes(p.name.toLowerCase()) || user.nickname.toLowerCase().includes(p.name.toLowerCase())).map(user => (
+                                          <div 
+                                            key={user.id} 
+                                            className="p-3 hover:bg-[#F8FAFB] cursor-pointer border-b border-[#E0E7E9] last:border-0"
+                                            onClick={() => {
+                                              updateParticipant(ev.id, p.id, "name", user.name);
+                                              setFocusedParticipantId(null);
+                                            }}
+                                          >
+                                            <p className="text-sm font-bold text-[#364d54]">{user.name}</p>
+                                            {user.nickname && <p className="text-[10px] text-[#A0AEC0] uppercase tracking-widest">{user.nickname}</p>}
+                                          </div>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </div>
                                   
                                   <div className="w-16 text-right font-black text-sm text-[#364d54] mr-1">
                                     <span className="text-[9px] text-[#A0AEC0] mr-0.5">MVR</span>{share.toFixed(0)}
@@ -630,11 +943,38 @@ export default function SplitterPage() {
                                 <div className="pl-8 pr-1 space-y-2 mt-1">
                                   {(p.items || []).map((item: any) => (
                                     <div key={item.id} className="flex items-center gap-2">
-                                      <input type="text" placeholder="Personal Item (e.g. Burger)" value={item.desc} onChange={e => updateParticipantItem(ev.id, p.id, item.id, "desc", e.target.value)} className="flex-grow bg-gray-50 rounded-lg border-none focus:ring-1 focus:ring-orange-300 text-xs font-bold p-2" />
-                                      <input type="number" placeholder="Price" value={item.price} onChange={e => updateParticipantItem(ev.id, p.id, item.id, "price", e.target.value)} className="w-20 bg-gray-50 rounded-lg border-none focus:ring-1 focus:ring-orange-300 text-xs font-bold p-2 text-center" />
+                                      <input 
+                                        type="text" 
+                                        placeholder="Item Name" 
+                                        list={`master-items-${ev.id}`}
+                                        value={item.desc} 
+                                        onChange={e => updateParticipantItem(ev.id, p.id, item.id, "desc", e.target.value)} 
+                                        className="flex-grow bg-gray-50 rounded-lg border-none focus:ring-1 focus:ring-[#5fa4ad] text-xs font-bold p-2" 
+                                      />
+                                      <input 
+                                        type="number" 
+                                        placeholder="Qty" 
+                                        value={item.qty} 
+                                        onChange={e => updateParticipantItem(ev.id, p.id, item.id, "qty", e.target.value)} 
+                                        className="w-16 bg-gray-50 rounded-lg border-none focus:ring-1 focus:ring-[#5fa4ad] text-xs font-bold p-2 text-center" 
+                                      />
+                                      <input 
+                                        type="number" 
+                                        placeholder="Price/ea" 
+                                        value={item.price} 
+                                        onChange={e => updateParticipantItem(ev.id, p.id, item.id, "price", e.target.value)} 
+                                        className="w-20 bg-gray-50 rounded-lg border-none focus:ring-1 focus:ring-[#5fa4ad] text-xs font-bold p-2 text-center" 
+                                      />
                                       <button onClick={() => removeParticipantItem(ev.id, p.id, item.id)} className="text-gray-300 hover:text-red-400 p-1"><X size={14}/></button>
                                     </div>
                                   ))}
+                                  
+                                  <datalist id={`master-items-${ev.id}`}>
+                                    {(ev.invoiceItems || []).map((inv: any) => (
+                                      <option key={inv.id} value={inv.desc} />
+                                    ))}
+                                  </datalist>
+
                                   <button onClick={() => addParticipantItem(ev.id, p.id)} className="text-[#A0AEC0] font-bold text-[9px] uppercase tracking-widest flex items-center gap-1 mt-1 hover:text-[#5fa4ad]">
                                     <Plus size={10}/> Add Personal Item
                                   </button>
@@ -689,6 +1029,54 @@ export default function SplitterPage() {
               <input type="text" placeholder="Account Number" value={mvrBankNo} onChange={e => setMvrBankNo(e.target.value)} className="w-full bg-gray-50 border-none p-4 rounded-2xl font-bold focus:ring-2 focus:ring-[#5fa4ad]" />
             </div>
             <button onClick={saveMvrBank} className="w-full bg-[#3a5b5e] text-white p-4 rounded-2xl font-black uppercase tracking-widest shadow-lg active:scale-95 transition-transform">Save Bank</button>
+          </div>
+        </div>
+      )}
+
+      {showDirModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[300] flex justify-center items-end sm:items-center">
+          <div className="bg-white w-full max-w-md rounded-t-[2rem] sm:rounded-[2rem] p-6 animate-in slide-in-from-bottom-8 max-h-[85vh] overflow-y-auto">
+            <div className="flex justify-between items-center mb-6">
+              <h3 className="text-lg font-black tracking-tight">User Directory</h3>
+              <button onClick={() => setShowDirModal(false)} className="bg-gray-100 p-2 rounded-full text-gray-500 hover:bg-gray-200"><X size={16}/></button>
+            </div>
+            
+            <div className="flex gap-2 mb-4">
+              <input placeholder="Name" value={dirName} onChange={e => setDirName(e.target.value)} className="flex-1 bg-gray-50 border border-gray-100 p-3 rounded-xl text-sm font-bold focus:ring-2 focus:ring-[#5fa4ad]" />
+              <input placeholder="Nickname" value={dirNick} onChange={e => setDirNick(e.target.value)} className="w-1/3 bg-gray-50 border border-gray-100 p-3 rounded-xl text-sm font-bold focus:ring-2 focus:ring-[#5fa4ad]" />
+              <button onClick={saveToDirectory} className="bg-[#3a5b5e] text-white p-3 rounded-xl font-black shadow-md hover:bg-[#2d4749]">
+                {editingDirId ? <CheckCircle2 size={20}/> : <Plus size={20}/>}
+              </button>
+              {editingDirId && (
+                <button onClick={() => { setEditingDirId(null); setDirName(""); setDirNick(""); }} className="bg-gray-200 text-gray-500 p-3 rounded-xl font-black shadow-md hover:bg-gray-300">
+                  <X size={20}/>
+                </button>
+              )}
+            </div>
+            
+            <button onClick={extractUsers} className="w-full bg-[#e0f2fe] text-[#0284c7] p-3 rounded-xl font-black text-[10px] uppercase tracking-widest mb-6 active:scale-95 transition-transform border border-blue-100 hover:bg-blue-100">
+              Auto-Extract from Events
+            </button>
+
+            <div className="space-y-2">
+              {directory.map(user => (
+                <div key={user.id} className="flex justify-between items-center p-3 bg-gray-50 rounded-xl border border-gray-100">
+                  <div>
+                    <p className="font-bold text-[#364d54] text-sm">{user.name}</p>
+                    {user.nickname && <p className="text-[10px] text-[#A0AEC0] font-black uppercase tracking-widest">{user.nickname}</p>}
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <button onClick={() => { setDirName(user.name); setDirNick(user.nickname); setEditingDirId(user.id); }} className="text-[#5fa4ad] hover:text-blue-500 p-2 rounded-full hover:bg-blue-50 transition-colors"><Edit2 size={16}/></button>
+                    <button onClick={() => deleteFromDirectory(user.id)} className="text-gray-400 hover:text-red-500 p-2 rounded-full hover:bg-red-50 transition-colors"><Trash2 size={16}/></button>
+                  </div>
+                </div>
+              ))}
+              {directory.length === 0 && (
+                <div className="text-center py-8 text-[#A0AEC0] font-bold text-sm">
+                  No registered users.
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}
