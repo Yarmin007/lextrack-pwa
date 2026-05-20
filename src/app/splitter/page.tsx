@@ -39,12 +39,17 @@ export default function SplitterPage() {
   // Local Shared Statuses (Maps person -> last shared total amount)
   const [sharedStatuses, setSharedStatuses] = useState<Record<string, number>>({});
 
-  // Directory State
+  // Directory State (Now linked to Supabase)
   const [directory, setDirectory] = useState<{id: string, name: string, nickname: string}[]>([]);
   const [showDirModal, setShowDirModal] = useState(false);
   const [dirName, setDirName] = useState("");
   const [dirNick, setDirNick] = useState("");
   const [editingDirId, setEditingDirId] = useState<string | null>(null);
+
+  // Merge Users State
+  const [isMerging, setIsMerging] = useState(false);
+  const [mergeSourceId, setMergeSourceId] = useState("");
+  const [mergeTargetId, setMergeTargetId] = useState("");
 
   // Details Tile State & Dropdown State
   const [expandedPerson, setExpandedPerson] = useState<string | null>(null);
@@ -57,9 +62,10 @@ export default function SplitterPage() {
 
   useEffect(() => {
     async function fetchData() {
-      const [eventsRes, adjsRes] = await Promise.all([
+      const [eventsRes, adjsRes, dirRes] = await Promise.all([
         supabase.from('splitter_events').select('*').order('event_date', { ascending: false }),
-        supabase.from('splitter_adjustments').select('*').order('created_at', { ascending: true })
+        supabase.from('splitter_adjustments').select('*').order('created_at', { ascending: true }),
+        supabase.from('directory').select('*').order('name', { ascending: true })
       ]);
       
       if (eventsRes.data) {
@@ -104,6 +110,11 @@ export default function SplitterPage() {
       if (adjsRes.data && Array.isArray(adjsRes.data)) {
         setAdjustments(adjsRes.data);
       }
+
+      // Load Directory directly from Supabase
+      if (dirRes.data && Array.isArray(dirRes.data)) {
+        setDirectory(dirRes.data);
+      }
     }
     fetchData();
 
@@ -115,9 +126,6 @@ export default function SplitterPage() {
 
     const savedStatuses = localStorage.getItem("lextrack_shared_statuses");
     if (savedStatuses) setSharedStatuses(JSON.parse(savedStatuses));
-
-    const savedDir = localStorage.getItem("lextrack_directory");
-    if (savedDir) setDirectory(JSON.parse(savedDir));
   }, []);
 
   const saveMvrBank = () => {
@@ -128,30 +136,37 @@ export default function SplitterPage() {
     showToast("MVR Bank saved successfully!");
   };
 
-  const saveToDirectory = () => {
+  const saveToDirectory = async () => {
     if (!dirName.trim()) return showToast("Name is required", "error");
     
     if (editingDirId) {
-      const next = directory.map(d => d.id === editingDirId ? { ...d, name: dirName.trim(), nickname: dirNick.trim() } : d);
-      setDirectory(next);
-      localStorage.setItem("lextrack_directory", JSON.stringify(next));
+      const { error } = await supabase.from('directory').update({ name: dirName.trim(), nickname: dirNick.trim() }).eq('id', editingDirId);
+      if (!error) {
+        setDirectory(directory.map(d => d.id === editingDirId ? { ...d, name: dirName.trim(), nickname: dirNick.trim() } : d));
+        showToast("User updated in directory");
+      } else {
+        console.error("Supabase Error Updating User:", error);
+        showToast("Error updating user", "error");
+      }
       setEditingDirId(null);
-      showToast("User updated in directory");
     } else {
       const newEntry = { id: generateId(), name: dirName.trim(), nickname: dirNick.trim() };
-      const next = [...directory, newEntry];
-      setDirectory(next);
-      localStorage.setItem("lextrack_directory", JSON.stringify(next));
-      showToast("User added to directory");
+      const { error } = await supabase.from('directory').insert(newEntry);
+      if (!error) {
+        setDirectory([...directory, newEntry]);
+        showToast("User added to directory");
+      } else {
+        console.error("Supabase Error Saving User:", error);
+        showToast("Error saving user", "error");
+      }
     }
     setDirName("");
     setDirNick("");
   };
 
-  const extractUsers = () => {
+  const extractUsers = async () => {
     const existingNames = new Set(directory.map(d => d.name.trim().toLowerCase()));
-    let added = 0;
-    const nextDir = [...directory];
+    let newUsers: any[] = [];
     
     events.forEach(ev => {
       ev.participants.forEach((p: any) => {
@@ -159,26 +174,108 @@ export default function SplitterPage() {
           const key = p.name.trim().toLowerCase();
           if (!existingNames.has(key)) {
             existingNames.add(key);
-            nextDir.push({ id: generateId(), name: p.name.trim(), nickname: "" });
-            added++;
+            newUsers.push({ id: generateId(), name: p.name.trim(), nickname: "" });
           }
         }
       });
     });
 
-    if (added > 0) {
-      setDirectory(nextDir);
-      localStorage.setItem("lextrack_directory", JSON.stringify(nextDir));
-      showToast(`Extracted ${added} new users!`);
+    if (newUsers.length > 0) {
+      const { error } = await supabase.from('directory').insert(newUsers);
+      if (!error) {
+        setDirectory([...directory, ...newUsers]);
+        showToast(`Extracted ${newUsers.length} new users!`);
+      } else {
+        console.error("Supabase Error Extracting Users:", error);
+        showToast("Error saving extracted users", "error");
+      }
     } else {
       showToast("No new users found to extract.");
     }
   };
 
-  const deleteFromDirectory = (id: string) => {
-    const next = directory.filter(d => d.id !== id);
-    setDirectory(next);
-    localStorage.setItem("lextrack_directory", JSON.stringify(next));
+  const deleteFromDirectory = async (id: string) => {
+    const { error } = await supabase.from('directory').delete().eq('id', id);
+    if (!error) {
+      setDirectory(directory.filter(d => d.id !== id));
+      showToast("User removed from directory");
+    } else {
+      console.error("Supabase Error Deleting User:", error);
+      showToast("Error deleting user", "error");
+    }
+  };
+
+  const handleMergeUsers = async () => {
+    if (!mergeSourceId || !mergeTargetId) return showToast("Select both users", "error");
+    if (mergeSourceId === mergeTargetId) return showToast("Cannot merge a user into themselves", "error");
+
+    const sourceUser = directory.find(d => d.id === mergeSourceId);
+    const targetUser = directory.find(d => d.id === mergeTargetId);
+
+    if (!sourceUser || !targetUser) return showToast("Invalid users selected", "error");
+
+    if (!confirm(`Are you sure you want to merge '${sourceUser.name}' into '${targetUser.name}'? This will update all past events and cannot be undone.`)) return;
+
+    const sourceKey = sourceUser.name.trim().toLowerCase();
+    const targetKey = targetUser.name.trim().toLowerCase();
+
+    let errorOccurred = false;
+
+    // 1. Update Adjustments in Database
+    const { error: adjError } = await supabase
+      .from('splitter_adjustments')
+      .update({ person_name: targetKey })
+      .eq('person_name', sourceKey);
+    
+    if (adjError) {
+      console.error("Adjustment merge error:", adjError);
+      errorOccurred = true;
+    }
+
+    // 2. Find and Update Events with the source user
+    const eventsToUpdate = events.filter(ev => ev.participants.some((p: any) => p.name?.trim().toLowerCase() === sourceKey));
+    
+    for (const ev of eventsToUpdate) {
+      const updatedParticipants = ev.participants.map((p: any) => {
+        if (p.name?.trim().toLowerCase() === sourceKey) {
+          return { ...p, name: targetUser.name };
+        }
+        return p;
+      });
+      
+      const payload = {
+        id: ev.id,
+        title: ev.title,
+        event_date: ev.date,
+        mode: ev.mode,
+        total_bill: parseFloat(ev.totalBill) || 0,
+        delivery_fee: parseFloat(ev.delivery) || 0,
+        gst: parseFloat(ev.gst) || 0,
+        discount: parseFloat(ev.discount) || 0,
+        invoice_items: ev.invoiceItems || [],
+        participants: updatedParticipants
+      };
+
+      const { error: evError } = await supabase.from('splitter_events').upsert(payload);
+      if (evError) {
+        console.error("Event merge error:", evError);
+        errorOccurred = true;
+      }
+    }
+
+    // 3. Delete Source User from Directory
+    await supabase.from('directory').delete().eq('id', mergeSourceId);
+
+    if (errorOccurred) {
+      showToast("Merge completed with some errors. Refreshing...", "error");
+    } else {
+      showToast("Merged successfully! Reloading data...");
+    }
+    
+    // Hard refresh to fully sync the updated JSON arrays and recalcs perfectly
+    setTimeout(() => {
+      window.location.reload();
+    }, 1500);
   };
 
   // --- STRICT ID-BASED STATE UPDATERS ---
@@ -1038,8 +1135,33 @@ export default function SplitterPage() {
           <div className="bg-white w-full max-w-md rounded-t-[2rem] sm:rounded-[2rem] p-6 animate-in slide-in-from-bottom-8 max-h-[85vh] overflow-y-auto">
             <div className="flex justify-between items-center mb-6">
               <h3 className="text-lg font-black tracking-tight">User Directory</h3>
-              <button onClick={() => setShowDirModal(false)} className="bg-gray-100 p-2 rounded-full text-gray-500 hover:bg-gray-200"><X size={16}/></button>
+              <div className="flex items-center gap-2">
+                <button onClick={() => setIsMerging(!isMerging)} className={`text-[10px] font-black uppercase tracking-widest px-3 py-1.5 rounded-xl transition-colors ${isMerging ? 'bg-orange-100 text-orange-600' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>
+                  {isMerging ? 'Cancel Merge' : 'Merge Users'}
+                </button>
+                <button onClick={() => setShowDirModal(false)} className="bg-gray-100 p-2 rounded-full text-gray-500 hover:bg-gray-200"><X size={16}/></button>
+              </div>
             </div>
+            
+            {isMerging && (
+              <div className="mb-6 bg-orange-50 border border-orange-100 p-4 rounded-2xl">
+                <h4 className="text-[10px] font-black text-orange-600 uppercase tracking-widest mb-3">Merge Duplicate Users</h4>
+                <div className="flex flex-col gap-2 mb-3">
+                  <select value={mergeSourceId} onChange={e => setMergeSourceId(e.target.value)} className="w-full bg-white border border-orange-200 p-2 rounded-xl text-sm font-bold focus:ring-2 focus:ring-orange-400">
+                    <option value="">Select User to REMOVE...</option>
+                    {directory.map(d => <option key={`src-${d.id}`} value={d.id}>{d.name}</option>)}
+                  </select>
+                  <div className="text-center text-orange-400 font-bold text-[10px] uppercase tracking-widest">Into</div>
+                  <select value={mergeTargetId} onChange={e => setMergeTargetId(e.target.value)} className="w-full bg-white border border-orange-200 p-2 rounded-xl text-sm font-bold focus:ring-2 focus:ring-orange-400">
+                    <option value="">Select User to KEEP...</option>
+                    {directory.map(d => <option key={`tgt-${d.id}`} value={d.id}>{d.name}</option>)}
+                  </select>
+                </div>
+                <button onClick={handleMergeUsers} className="w-full bg-orange-500 text-white p-3 rounded-xl font-black text-[10px] uppercase tracking-widest shadow-md active:scale-95 transition-transform">
+                  Confirm & Merge History
+                </button>
+              </div>
+            )}
             
             <div className="flex gap-2 mb-4">
               <input placeholder="Name" value={dirName} onChange={e => setDirName(e.target.value)} className="flex-1 bg-gray-50 border border-gray-100 p-3 rounded-xl text-sm font-bold focus:ring-2 focus:ring-[#5fa4ad]" />

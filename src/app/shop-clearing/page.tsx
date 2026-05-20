@@ -8,6 +8,10 @@ import Link from "next/link";
 export default function ShopClearingPage() {
   const [hosts, setHosts] = useState<any[]>([]);
   const [banks, setBanks] = useState<any[]>([]);
+  const [directory, setDirectory] = useState<any[]>([]);
+  
+  // Controls which hosts are shown strictly in the current month view
+  const [activeHostIds, setActiveHostIds] = useState<Set<string>>(new Set());
   
   const [showAddUser, setShowAddUser] = useState(false);
   const [showBanks, setShowBanks] = useState(false);
@@ -47,14 +51,20 @@ export default function ShopClearingPage() {
     async function fetchMonthData() {
       const { data: hostsData } = await supabase.from('hosts').select('*');
       const { data: banksData } = await supabase.from('bank_accounts').select('*');
+      const { data: dirData } = await supabase.from('directory').select('*');
+      
       if (hostsData) setHosts(hostsData);
       if (banksData) setBanks(banksData);
+      if (dirData) setDirectory(dirData);
 
       const { data: clearingsData } = await supabase.from('shop_clearings').select('*').eq('clearing_month', `${clearingMonth}-01`);
 
       const newRowData: Record<string, any> = {};
+      const activeIds = new Set<string>();
+      
       if (clearingsData) {
         clearingsData.forEach((c) => {
+          activeIds.add(c.host_id);
           newRowData[c.host_id] = {
             clearingId: c.id,
             billMvr: c.bill_amount_mvr?.toString() || "",
@@ -67,6 +77,7 @@ export default function ShopClearingPage() {
         });
       }
       setRowData(newRowData);
+      setActiveHostIds(activeIds);
     }
     fetchMonthData();
   }, [clearingMonth]);
@@ -144,16 +155,21 @@ export default function ShopClearingPage() {
     }
   };
 
-  const handleDeleteHost = async (hostId: string, hostName: string) => {
-    if (confirm(`Are you sure you want to PERMANENTLY delete client ${hostName}? This cannot be undone.`)) {
-      const { error } = await supabase.from('hosts').delete().eq('id', hostId);
-      if (!error) {
-        setHosts(hosts.filter(h => h.id !== hostId));
+  const handleRemoveFromMonth = async (hostId: string, hostName: string) => {
+    if (confirm(`Remove ${hostName} from this month's view? (This will delete their ledger record for THIS MONTH only)`)) {
+      const row = rowData[hostId];
+      if (row?.clearingId) {
+        await supabase.from('shop_clearings').delete().eq('id', row.clearingId);
         const newRowData = { ...rowData };
         delete newRowData[hostId];
         setRowData(newRowData);
-        showToast("Client permanently deleted.");
       }
+      setActiveHostIds(prev => {
+        const next = new Set(prev);
+        next.delete(hostId);
+        return next;
+      });
+      showToast("Removed from this month's view.");
     }
   };
 
@@ -200,13 +216,29 @@ export default function ShopClearingPage() {
     }
   };
 
+  const handleAddExistingHostToMonth = (hostId: string) => {
+    setActiveHostIds(prev => {
+      const next = new Set(prev);
+      next.add(hostId);
+      return next;
+    });
+    setShowAddUser(false);
+    showToast("Client added to this month!");
+  };
+
   const handleAddCustomer = async () => {
-    if (!newHostName || !newHostNo) return showToast("Enter Name and Host No.", "error");
-    const { data, error } = await supabase.from('hosts').insert({ name: newHostName, host_no: newHostNo }).select().single();
+    if (!newHostName) return showToast("Enter Name.", "error");
+    
+    const finalHostNo = newHostNo || `H-${Math.floor(Math.random()*10000)}`;
+    
+    const { data, error } = await supabase.from('hosts').insert({ name: newHostName, host_no: finalHostNo }).select().single();
     if (data) {
       setHosts([...hosts, data]);
+      setActiveHostIds(prev => new Set(prev).add(data.id));
       setNewHostName(""); setNewHostNo(""); setShowAddUser(false);
-      showToast("Customer added!");
+      showToast("Customer created and added!");
+    } else {
+      showToast("Error creating client", "error");
     }
   };
 
@@ -304,7 +336,7 @@ export default function ShopClearingPage() {
           </div>
 
           <div className="space-y-4">
-            {hosts.map(host => {
+            {hosts.filter(h => activeHostIds.has(h.id)).map(host => {
               const row = rowData[host.id] || { billMvr: "", rate: "15.42", advances: [], received: "" };
               const b = parseFloat(row.billMvr) || 0;
               const r = parseFloat(row.rate) || 15.42;
@@ -322,7 +354,7 @@ export default function ShopClearingPage() {
                     <div>
                       <div className="flex items-center gap-2 mb-1">
                         <h3 className="font-black text-lg text-[#364d54]">{host.name}</h3>
-                        <button onClick={() => handleDeleteHost(host.id, host.name)} title="Permanently delete client" className="text-gray-300 hover:text-red-500 transition-colors"><UserMinus size={14} /></button>
+                        <button onClick={() => handleRemoveFromMonth(host.id, host.name)} title="Remove from this month" className="text-gray-300 hover:text-red-500 transition-colors"><X size={14} /></button>
                       </div>
                       <p className="text-[10px] font-bold text-[#A0AEC0] uppercase tracking-wider mb-2">Host: {host.host_no}</p>
                       {isFullyPaid ? (
@@ -366,6 +398,13 @@ export default function ShopClearingPage() {
                 </div>
               );
             })}
+            
+            {hosts.filter(h => activeHostIds.has(h.id)).length === 0 && (
+              <div className="text-center py-10 bg-white rounded-3xl border border-dashed border-[#A0AEC0]">
+                <p className="font-bold text-[#A0AEC0]">No clients active in this month yet.</p>
+                <button onClick={() => setShowAddUser(true)} className="mt-4 px-4 py-2 bg-[#e0f2fe] text-[#0284c7] rounded-xl font-black text-[10px] uppercase tracking-widest">Add Client to Month</button>
+              </div>
+            )}
           </div>
         </div>
 
@@ -383,14 +422,35 @@ export default function ShopClearingPage() {
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[300] flex justify-center items-end sm:items-center">
           <div className="bg-white w-full max-w-md rounded-t-[2rem] sm:rounded-[2rem] p-6 animate-in slide-in-from-bottom-8">
             <div className="flex justify-between items-center mb-6">
-              <h3 className="text-lg font-black tracking-tight">New Customer</h3>
+              <h3 className="text-lg font-black tracking-tight">Add Client to Month</h3>
               <button onClick={() => setShowAddUser(false)} className="bg-gray-100 p-2 rounded-full text-gray-500 hover:bg-gray-200"><X size={16}/></button>
             </div>
-            <div className="space-y-3 mb-6">
-              <input type="text" placeholder="Full Name" value={newHostName} onChange={e => setNewHostName(e.target.value)} className="w-full bg-gray-50 border-none p-4 rounded-2xl font-bold focus:ring-2 focus:ring-[#5fa4ad]" />
-              <input type="text" placeholder="Host No. / ID" value={newHostNo} onChange={e => setNewHostNo(e.target.value)} className="w-full bg-gray-50 border-none p-4 rounded-2xl font-bold focus:ring-2 focus:ring-[#5fa4ad]" />
+            
+            <div className="space-y-4 mb-6">
+              <div>
+                <h4 className="text-[10px] font-black text-[#A0AEC0] mb-2 uppercase tracking-widest">Add Existing Client</h4>
+                <div className="max-h-32 overflow-y-auto space-y-1 bg-gray-50 rounded-xl p-2 border border-gray-100">
+                  {hosts.filter(h => !activeHostIds.has(h.id)).length === 0 && <p className="text-[10px] text-center p-2 text-gray-400">All clients are active this month.</p>}
+                  {hosts.filter(h => !activeHostIds.has(h.id)).map(h => (
+                    <div key={h.id} className="flex justify-between items-center p-2 bg-white rounded-lg shadow-sm">
+                      <span className="text-sm font-bold text-[#364d54]">{h.name}</span>
+                      <button onClick={() => handleAddExistingHostToMonth(h.id)} className="text-[10px] bg-[#e0f2fe] text-[#0284c7] px-2 py-1 rounded font-bold uppercase">Add</button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              
+              <div className="relative pt-4 border-t border-gray-100">
+                <h4 className="text-[10px] font-black text-[#A0AEC0] mb-2 uppercase tracking-widest">Or Create New Client</h4>
+                <input type="text" list="directory-suggestions" placeholder="Full Name (Pick from Directory)" value={newHostName} onChange={e => setNewHostName(e.target.value)} className="w-full bg-gray-50 border-none p-4 rounded-2xl font-bold focus:ring-2 focus:ring-[#5fa4ad] mb-2" />
+                <datalist id="directory-suggestions">
+                  {directory.map(d => <option key={d.id} value={d.name} />)}
+                </datalist>
+                <input type="text" placeholder="Host No. / ID (Optional)" value={newHostNo} onChange={e => setNewHostNo(e.target.value)} className="w-full bg-gray-50 border-none p-4 rounded-2xl font-bold focus:ring-2 focus:ring-[#5fa4ad]" />
+              </div>
             </div>
-            <button onClick={handleAddCustomer} className="w-full bg-[#3a5b5e] text-white p-4 rounded-2xl font-black uppercase tracking-widest shadow-lg active:scale-95 transition-transform">Save Customer</button>
+            
+            <button onClick={handleAddCustomer} className="w-full bg-[#3a5b5e] text-white p-4 rounded-2xl font-black uppercase tracking-widest shadow-lg active:scale-95 transition-transform">Save & Add Client</button>
           </div>
         </div>
       )}
