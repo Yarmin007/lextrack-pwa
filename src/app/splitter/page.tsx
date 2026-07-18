@@ -1,11 +1,11 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import { 
-  Utensils, Navigation, Plus, X, Trash2, Wallet, 
-  ShoppingCart, ReceiptText, Calculator, Settings, 
-  PieChart, CheckCircle2, AlertCircle, ChevronDown, ChevronUp, Send, User, Landmark, Banknote, Users, Edit2, Package
+  Plus, X, Trash2, Wallet, ShoppingCart, Calculator, Settings, 
+  CheckCircle2, AlertCircle, ChevronDown, ChevronUp, Send, User, 
+  Landmark, Banknote, Users, Edit2, Package, CheckSquare, ArrowUpRight, ArrowDownRight, LayoutDashboard
 } from "lucide-react";
 import Link from "next/link";
 
@@ -55,67 +55,71 @@ export default function SplitterPage() {
   const [expandedPerson, setExpandedPerson] = useState<string | null>(null);
   const [focusedParticipantId, setFocusedParticipantId] = useState<string | null>(null);
 
+  // UX Animation Delay State to lock user list sorting positions while clicking "Pay"
+  const [sortingLockTimer, setSortingLockTimer] = useState<NodeJS.Timeout | null>(null);
+  const [lockedOrderKeys, setLockedOrderKeys] = useState<string[]>([]);
+
   const showToast = (message: string, type: 'success' | 'error' = 'success') => {
     setToast({ message, type });
     setTimeout(() => setToast(null), 3000);
   };
 
-  useEffect(() => {
-    async function fetchData() {
-      const [eventsRes, adjsRes, dirRes] = await Promise.all([
-        supabase.from('splitter_events').select('*').order('event_date', { ascending: false }),
-        supabase.from('splitter_adjustments').select('*').order('created_at', { ascending: true }),
-        supabase.from('directory').select('*').order('name', { ascending: true })
-      ]);
-      
-      if (eventsRes.data) {
-        const usedIds = new Set();
-        const getSafeId = (id: string | undefined) => {
-          if (!id || usedIds.has(id)) {
-            const newId = generateId();
-            usedIds.add(newId);
-            return newId;
+  const fetchData = useCallback(async () => {
+    const [eventsRes, adjsRes, dirRes] = await Promise.all([
+      supabase.from('splitter_events').select('*').order('event_date', { ascending: false }),
+      supabase.from('splitter_adjustments').select('*').order('created_at', { ascending: true }),
+      supabase.from('directory').select('*').order('name', { ascending: true })
+    ]);
+    
+    if (eventsRes.data) {
+      const usedIds = new Set();
+      const getSafeId = (id: string | undefined) => {
+        if (!id || usedIds.has(id)) {
+          const newId = generateId();
+          usedIds.add(newId);
+          return newId;
+        }
+        usedIds.add(id);
+        return id;
+      };
+
+      const mapped = eventsRes.data.map(e => ({
+        id: e.id,
+        title: e.title,
+        date: e.event_date,
+        mode: e.mode,
+        totalBill: e.total_bill?.toString() || "",
+        delivery: e.delivery_fee?.toString() || "",
+        gst: e.gst?.toString() || "",
+        discount: e.discount?.toString() || "",
+        invoiceItems: e.invoice_items || [],
+        participants: (e.participants || []).map((p: any) => {
+          let mergedItems = p.items || [];
+          if (mergedItems.length === 0 && p.amount) {
+            mergedItems = [{ id: getSafeId(undefined), desc: "Food", price: p.amount, qty: 1 }];
           }
-          usedIds.add(id);
-          return id;
-        };
-
-        const mapped = eventsRes.data.map(e => ({
-          id: e.id,
-          title: e.title,
-          date: e.event_date,
-          mode: e.mode,
-          totalBill: e.total_bill?.toString() || "",
-          delivery: e.delivery_fee?.toString() || "",
-          gst: e.gst?.toString() || "",
-          discount: e.discount?.toString() || "",
-          invoiceItems: e.invoice_items || [],
-          participants: (e.participants || []).map((p: any) => {
-            let mergedItems = p.items || [];
-            if (mergedItems.length === 0 && p.amount) {
-              mergedItems = [{ id: getSafeId(undefined), desc: "Food", price: p.amount, qty: 1 }];
-            }
-            return {
-              ...p,
-              id: getSafeId(p.id),
-              paysMain: p.paysMain !== undefined ? p.paysMain : (p.isIncluded !== false), 
-              paysDelivery: p.paysDelivery !== undefined ? p.paysDelivery : (p.isIncluded !== false),
-              items: mergedItems.map((item: any) => ({ ...item, id: getSafeId(item.id), qty: item.qty || 1 }))
-            };
-          })
-        }));
-        setEvents(sortEventsDesc(mapped));
-      }
-
-      if (adjsRes.data && Array.isArray(adjsRes.data)) {
-        setAdjustments(adjsRes.data);
-      }
-
-      // Load Directory directly from Supabase
-      if (dirRes.data && Array.isArray(dirRes.data)) {
-        setDirectory(dirRes.data);
-      }
+          return {
+            ...p,
+            id: getSafeId(p.id),
+            paysMain: p.paysMain !== undefined ? p.paysMain : (p.isIncluded !== false), 
+            paysDelivery: p.paysDelivery !== undefined ? p.paysDelivery : (p.isIncluded !== false),
+            items: mergedItems.map((item: any) => ({ ...item, id: getSafeId(item.id), qty: item.qty || 1 }))
+          };
+        })
+      }));
+      setEvents(sortEventsDesc(mapped));
     }
+
+    if (adjsRes.data && Array.isArray(adjsRes.data)) {
+      setAdjustments(adjsRes.data);
+    }
+
+    if (dirRes.data && Array.isArray(dirRes.data)) {
+      setDirectory(dirRes.data);
+    }
+  }, []);
+
+  useEffect(() => {
     fetchData();
 
     // Load Local Banks and Statuses
@@ -126,7 +130,7 @@ export default function SplitterPage() {
 
     const savedStatuses = localStorage.getItem("lextrack_shared_statuses");
     if (savedStatuses) setSharedStatuses(JSON.parse(savedStatuses));
-  }, []);
+  }, [fetchData]);
 
   const saveMvrBank = () => {
     if (!mvrBankName || !mvrBankNo) return showToast("Please fill both fields.", "error");
@@ -272,7 +276,6 @@ export default function SplitterPage() {
       showToast("Merged successfully! Reloading data...");
     }
     
-    // Hard refresh to fully sync the updated JSON arrays and recalcs perfectly
     setTimeout(() => {
       window.location.reload();
     }, 1500);
@@ -361,7 +364,20 @@ export default function SplitterPage() {
   
   const removeParticipantItem = (eventId: string, pId: string, itemId: string) => { setEvents(prev => prev.map(e => e.id === eventId ? { ...e, participants: e.participants.map((p:any) => p.id === pId ? { ...p, items: (p.items || []).filter((it:any) => it.id !== itemId) } : p) } : e)); };
 
-  const markAsPaidFromTile = async (eventId: string, participantId: string) => {
+  const lockSortingTemporarily = (currentPendingList: any[]) => {
+    if (sortingLockTimer) clearTimeout(sortingLockTimer);
+    if (lockedOrderKeys.length === 0) {
+      setLockedOrderKeys(currentPendingList.map(p => p.name.trim().toLowerCase()));
+    }
+    const timer = setTimeout(() => {
+      setLockedOrderKeys([]);
+    }, 5000); // Locks sorting layout index positions for 5 full seconds before allowing jumps
+    setSortingLockTimer(timer);
+  };
+
+  const markAsPaidFromTile = async (eventId: string, participantId: string, currentPendingList: any[]) => {
+    lockSortingTemporarily(currentPendingList);
+    
     const ev = events.find(e => e.id === eventId);
     if (!ev) return;
     
@@ -399,6 +415,76 @@ export default function SplitterPage() {
     }
   };
 
+  // --- BATCH CONFIRM FULL RECOVERY PAY ---
+  const markPersonFullyPaid = async (person: any, currentPendingList: any[]) => {
+    if (!confirm(`Mark all ${person.details.length} events for ${person.name} as fully paid?`)) return;
+    
+    lockSortingTemporarily(currentPendingList);
+    
+    // Create localized mutations map
+    const eventsToUpdateMap: Record<string, any> = {};
+    
+    person.details.forEach((d: any) => {
+      const matchEv = events.find(e => e.id === d.eventId);
+      if (matchEv) {
+        if (!eventsToUpdateMap[matchEv.id]) {
+          eventsToUpdateMap[matchEv.id] = JSON.parse(JSON.stringify(matchEv));
+        }
+        eventsToUpdateMap[matchEv.id].participants = eventsToUpdateMap[matchEv.id].participants.map((p: any) => 
+          p.id === d.participantId ? { ...p, hasPaid: true } : p
+        );
+      }
+    });
+
+    // Run parallel mutations pipeline across local state + database streams
+    try {
+      await Promise.all(
+        Object.values(eventsToUpdateMap).map(async (ev: any) => {
+          const shares = ev.participants.map((p: any) => ({
+            ...p,
+            share: calculateShare(ev, p)
+          }));
+          
+          const payload = {
+            id: ev.id,
+            title: ev.title,
+            event_date: ev.date,
+            mode: ev.mode,
+            total_bill: parseFloat(ev.totalBill) || 0,
+            delivery_fee: parseFloat(ev.delivery) || 0,
+            gst: parseFloat(ev.gst) || 0,
+            discount: parseFloat(ev.discount) || 0,
+            invoice_items: ev.invoiceItems || [],
+            participants: shares
+          };
+          
+          const { error } = await supabase.from('splitter_events').upsert(payload);
+          if (error) throw error;
+        })
+      );
+
+      // Mutate UI locally upon successful database confirmation responses
+      setEvents(prev => prev.map(e => {
+        if (eventsToUpdateMap[e.id]) {
+          const target = eventsToUpdateMap[e.id];
+          return {
+            ...e,
+            participants: target.participants.map((p: any) => ({
+              ...p,
+              share: calculateShare(target, p)
+            }))
+          };
+        }
+        return e;
+      }));
+
+      showToast(`Settled all ${person.name} records completely!`);
+    } catch (err) {
+      console.error(err);
+      showToast("Error executing global settlement bundle", "error");
+    }
+  };
+
   // --- FIX: DATABASE-BACKED ADJUSTMENTS ---
   const addAdjustment = async (personName: string) => {
     const key = personName.trim().toLowerCase();
@@ -426,33 +512,27 @@ export default function SplitterPage() {
     if (error) showToast("Failed to delete", "error");
   };
 
-  // --- REBUILT MATH ENGINE (PRO-RATA GST/DISCOUNT & ISOLATED SHARED ITEMS) ---
+  // --- REBUILT MATH ENGINE ---
   const calculateShare = (event: any, participant: any) => {
     let subtotal = 0;
-
-    // 1. Personal Items Subtotal
     subtotal += (participant.items || []).reduce((sum: number, item: any) => sum + ((parseFloat(item.price) || 0) * (parseFloat(item.qty) || 1)), 0);
 
-    // 2. Extra Shared Amount (from the explicit totalBill field)
     const mainCount = Math.max(1, event.participants.filter((p: any) => p.paysMain !== false).length);
     if (participant.paysMain !== false) {
       const sharedNum = parseFloat(event.totalBill) || 0;
       subtotal += (sharedNum / mainCount);
     }
 
-    // 3. Apply GST to their specific portion
     const gstPercent = parseFloat(event.gst) || 0;
     const gstAmount = subtotal * (gstPercent / 100);
     let total = subtotal + gstAmount;
 
-    // 4. Delivery Fee (Usually no GST on delivery)
     if (participant.paysDelivery !== false) {
       const devCount = Math.max(1, event.participants.filter((p: any) => p.paysDelivery !== false).length);
       const deliveryNum = parseFloat(event.delivery) || 0;
       total += (deliveryNum / devCount);
     }
 
-    // 5. Discount (Split equally among main payers)
     if (participant.paysMain !== false) {
       const discountNum = parseFloat(event.discount) || 0;
       total -= (discountNum / mainCount);
@@ -525,7 +605,6 @@ export default function SplitterPage() {
         if (!p.hasPaid && key) {
           const share = calculateShare(ev, p);
 
-          // Calculate precise breakdown for WA invoice
           const itemsSubtotal = (p.items || []).reduce((sum: number, item: any) => sum + ((parseFloat(item.price) || 0) * (parseFloat(item.qty) || 1)), 0);
           const sharedSubtotal = p.paysMain !== false ? (parseFloat(ev.totalBill) || 0) / mainCount : 0;
           const gstPercent = parseFloat(ev.gst) || 0;
@@ -558,7 +637,21 @@ export default function SplitterPage() {
       });
     });
 
-    return Object.values(personMap).sort((a, b) => b.totalOwed - a.totalOwed);
+    const standardSortList = Object.values(personMap);
+
+    // If an interaction lock array is active, use that specific layout key map position
+    if (lockedOrderKeys.length > 0) {
+      return standardSortList.sort((a, b) => {
+        const indexA = lockedOrderKeys.indexOf(a.name.trim().toLowerCase());
+        const indexB = lockedOrderKeys.indexOf(b.name.trim().toLowerCase());
+        if (indexA !== -1 && indexB !== -1) return indexA - indexB;
+        if (indexA !== -1) return -1;
+        if (indexB !== -1) return 1;
+        return b.totalOwed - a.totalOwed;
+      });
+    }
+
+    return standardSortList.sort((a, b) => b.totalOwed - a.totalOwed);
   };
 
   const sendPersonalInvoice = (person: any, personAdjs: any[], finalTotal: number) => {
@@ -578,20 +671,20 @@ export default function SplitterPage() {
         
         d.items.forEach((item: any) => {
           if (item.desc || item.price) {
-            msg += `   └ ${item.desc || "Item"} (x${item.qty || 1}): ${((parseFloat(item.price)||0)*(parseFloat(item.qty)||1)).toFixed(2)}\n`;
+            msg += `    └ ${item.desc || "Item"} (x${item.qty || 1}): ${((parseFloat(item.price)||0)*(parseFloat(item.qty)||1)).toFixed(2)}\n`;
           }
         });
 
-        if (d.sharedSubtotal > 0) msg += `   └ Shared Items: ${d.sharedSubtotal.toFixed(2)}\n`;
-        if (d.gstAmount > 0) msg += `   └ GST (${d.gstPercent}%): +${d.gstAmount.toFixed(2)}\n`;
-        if (d.deliverySplit > 0) msg += `   └ Delivery Fee: +${d.deliverySplit.toFixed(2)}\n`;
-        if (d.discountShare > 0) msg += `   └ Discount: -${d.discountShare.toFixed(2)}\n`;
+        if (d.sharedSubtotal > 0) msg += `    └ Shared Items: ${d.sharedSubtotal.toFixed(2)}\n`;
+        if (d.gstAmount > 0) msg += `    └ GST (${d.gstPercent}%): +${d.gstAmount.toFixed(2)}\n`;
+        if (d.deliverySplit > 0) msg += `    └ Delivery Fee: +${d.deliverySplit.toFixed(2)}\n`;
+        if (d.discountShare > 0) msg += `    └ Discount: -${d.discountShare.toFixed(2)}\n`;
 
         if (d.share === 0 && d.items.length === 0) {
-          msg += `   └ (Exempt from Event)\n`;
+          msg += `    └ (Exempt from Event)\n`;
         }
         
-        msg += `   Subtotal: ${d.share.toFixed(2)} MVR\n\n`;
+        msg += `    Subtotal: ${d.share.toFixed(2)} MVR\n\n`;
       });
     }
 
@@ -601,10 +694,10 @@ export default function SplitterPage() {
     if (charges.length > 0 || payments.length > 0) {
       msg += `*Adjustments:*\n`;
       charges.forEach((item: any) => {
-        if (item.desc_text || item.amount) msg += `   └ ${item.desc_text || "Debt"}: +${item.amount || 0} MVR\n`;
+        if (item.desc_text || item.amount) msg += `    └ ${item.desc_text || "Debt"}: +${item.amount || 0} MVR\n`;
       });
       payments.forEach((item: any) => {
-        if (item.desc_text || item.amount) msg += `   └ ${item.desc_text || "Payment"}: -${item.amount || 0} MVR\n`;
+        if (item.desc_text || item.amount) msg += `    └ ${item.desc_text || "Payment"}: -${item.amount || 0} MVR\n`;
       });
       msg += `\n`;
     }
@@ -623,14 +716,13 @@ export default function SplitterPage() {
     });
   };
 
-  // --- GLOBAL TOTALS ENGINE (Includes Payments & Debts) ---
+  // --- GLOBAL TOTALS ENGINE ---
   let globalTotalOwed = 0;
   let globalTotalCollected = 0;
 
   events.forEach(ev => {
     ev.participants.forEach((p: any) => {
       const key = p.name?.trim().toLowerCase();
-      // EXCLUDE YAMIN
       if (key === 'yamin' || key === 'abdulla yamin') return; 
 
       const share = calculateShare(ev, p);
@@ -655,67 +747,73 @@ export default function SplitterPage() {
   const pendingPeople = getPendingByPerson();
 
   return (
-    <main className="min-h-screen bg-[#F0F4F8] text-[#364d54] font-sans flex relative">
+    <main className="min-h-screen bg-[#F8FAFC] text-[#1E293B] font-sans antialiased flex selection:bg-sky-500/10">
 
       {toast && (
-        <div className={`fixed top-6 right-1/2 translate-x-1/2 lg:translate-x-0 lg:right-6 z-[400] px-6 py-4 rounded-2xl shadow-2xl flex items-center gap-3 text-sm font-bold animate-in fade-in slide-in-from-top-5 duration-300 ${toast.type === 'success' ? 'bg-[#3a5b5e] text-white' : 'bg-red-500 text-white'}`}>
-          {toast.type === 'success' ? <CheckCircle2 size={20} /> : <AlertCircle size={20} />}
+        <div className={`fixed top-6 right-1/2 translate-x-1/2 lg:translate-x-0 lg:right-6 z-[400] px-5 py-3.5 rounded-xl shadow-xl flex items-center gap-3 text-xs font-bold animate-in fade-in slide-in-from-top-4 duration-200 bg-slate-950 text-white`}>
+          {toast.type === 'success' ? <CheckCircle2 size={16} className="text-emerald-400" /> : <AlertCircle size={16} className="text-rose-400" />}
           {toast.message}
         </div>
       )}
 
-      <aside className="hidden lg:flex w-72 bg-white border-r border-[#E0E7E9] flex-col p-8 sticky top-0 h-screen shrink-0 z-40">
-        <div className="mb-12">
-          <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#5fa4ad] mb-1">LexCorp Systems</p>
-          <h1 className="text-2xl font-black tracking-tighter uppercase">Lextrack</h1>
+      {/* PREMIUM SIDEBAR FOR PC DOCK */}
+      <aside className="hidden lg:flex w-72 bg-white border-r border-slate-200/80 flex-col p-6 sticky top-0 h-screen shrink-0 z-40">
+        <div className="flex items-center gap-3 mb-10 px-2">
+          <div className="w-9 h-9 rounded-xl bg-slate-900 flex items-center justify-center text-white font-black shadow-md">L</div>
+          <div>
+            <h1 className="text-base font-bold tracking-tight text-slate-900 leading-none">Lextrack</h1>
+            <p className="text-[9px] font-bold uppercase tracking-[0.12em] text-slate-400 mt-1">LexCorp System</p>
+          </div>
         </div>
-        <nav className="space-y-3 flex-grow">
-          <Link href="/" className="w-full flex items-center gap-4 px-5 py-4 rounded-2xl text-sm font-bold hover:bg-[#F8FAFB] text-[#A0AEC0] transition-all"><Wallet size={20}/> Dashboard</Link>
-          <Link href="/tracker" className="w-full flex items-center gap-4 px-5 py-4 rounded-2xl text-sm font-bold hover:bg-[#F8FAFB] text-[#A0AEC0] transition-all"><Banknote size={20}/> Tracker</Link>
-          <Link href="/splitter" className="w-full flex items-center gap-4 px-5 py-4 rounded-2xl text-sm font-bold bg-[#3a5b5e] text-white shadow-lg transition-all"><Calculator size={20}/> Splitter</Link>
-          <Link href="/shop-clearing" className="w-full flex items-center gap-4 px-5 py-4 rounded-2xl text-sm font-bold hover:bg-[#F8FAFB] text-[#A0AEC0] transition-all"><ShoppingCart size={20}/> Clearing</Link>
-          <Link href="/analytics" className="w-full flex items-center gap-4 px-5 py-4 rounded-2xl text-sm font-bold hover:bg-[#F8FAFB] text-[#A0AEC0] transition-all"><PieChart size={20}/> Analytics</Link>
+        <nav className="space-y-1 flex-grow">
+          <Link href="/" className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium hover:bg-slate-50 text-slate-500 hover:text-slate-900 transition-all duration-150"><LayoutDashboard size={18}/> Dashboard</Link>
+          <Link href="/tracker" className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium hover:bg-slate-50 text-slate-500 hover:text-slate-900 transition-all duration-150"><Banknote size={18}/> Tracker</Link>
+          <Link href="/splitter" className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold bg-slate-900 text-white shadow-sm transition-all duration-200"><Calculator size={18}/> Splitter</Link>
+          <Link href="/shop-clearing" className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium hover:bg-slate-50 text-slate-500 hover:text-slate-900 transition-all duration-150"><ShoppingCart size={18}/> Clearing</Link>
+          <Link href="/myself" className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium hover:bg-slate-50 text-slate-500 hover:text-slate-900 transition-all duration-150"><User size={18}/> Myself</Link>
         </nav>
+        <button className="flex items-center gap-3 px-4 py-3 text-sm font-medium text-slate-400 hover:text-slate-600 transition-colors duration-150"><Settings size={18}/> Settings</button>
       </aside>
 
-      <div className="flex-grow flex flex-col min-h-screen overflow-y-auto">
-        <div className="w-full max-w-[1200px] mx-auto px-4 lg:px-8 py-6 lg:py-10 pb-40">
+      {/* CORE FRAME CONTAINER */}
+      <div className="flex-grow flex flex-col min-h-screen overflow-y-auto bg-[#F8FAFC]">
+        <div className="w-full max-w-[1140px] mx-auto px-4 lg:px-8 py-6 lg:py-8 pb-40">
           
           <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
             <div>
-              <h2 className="text-2xl lg:text-3xl font-black tracking-tight">Split Ledger</h2>
-              <p className="text-[10px] font-bold text-[#A0AEC0] uppercase tracking-widest mt-1">Universal Group Splitter</p>
+              <h2 className="text-xl lg:text-2xl font-bold tracking-tight text-slate-900">Split Ledger</h2>
+              <p className="text-xs font-medium text-slate-400 mt-0.5">Universal Group Bill Splitter</p>
             </div>
             <div className="flex gap-2 w-full sm:w-auto">
-              <button onClick={() => setShowDirModal(true)} className="flex-1 sm:flex-none h-12 px-4 rounded-2xl bg-white border border-[#E0E7E9] text-[#364d54] font-black text-xs uppercase tracking-widest shadow-sm flex items-center justify-center gap-2 active:scale-95 transition-transform">
-                <Users size={16}/> Directory
+              <button onClick={() => setShowDirModal(true)} className="flex-1 sm:flex-none h-10 px-4 rounded-xl bg-white border border-slate-200/60 text-slate-700 font-semibold text-xs uppercase tracking-wider shadow-sm flex items-center justify-center gap-2 hover:bg-slate-50 active:scale-95 transition-all">
+                <Users size={14}/> Directory
               </button>
-              <button onClick={() => setShowBankModal(true)} className="flex-1 sm:flex-none h-12 px-4 rounded-2xl bg-white border border-[#E0E7E9] text-[#364d54] font-black text-xs uppercase tracking-widest shadow-sm flex items-center justify-center gap-2 active:scale-95 transition-transform">
-                <Landmark size={16}/> MVR Bank
+              <button onClick={() => setShowBankModal(true)} className="flex-1 sm:flex-none h-10 px-4 rounded-xl bg-white border border-slate-200/60 text-slate-700 font-semibold text-xs uppercase tracking-wider shadow-sm flex items-center justify-center gap-2 hover:bg-slate-50 active:scale-95 transition-all">
+                <Landmark size={14}/> MVR Bank
               </button>
-              <button onClick={createNewEvent} className="flex-1 sm:flex-none h-12 px-6 rounded-2xl bg-[#3a5b5e] text-white font-black text-xs uppercase tracking-widest shadow-lg flex items-center justify-center gap-2 active:scale-95 transition-transform">
-                <Plus size={16}/> New Split
+              <button onClick={createNewEvent} className="flex-1 sm:flex-none h-10 px-5 rounded-xl bg-slate-900 text-white font-semibold text-xs uppercase tracking-wider shadow-sm flex items-center justify-center gap-2 active:scale-95 transition-all">
+                <Plus size={14}/> New Split
               </button>
             </div>
           </header>
 
-          <div className="grid grid-cols-2 gap-4 mb-8">
-            <div className="bg-white p-6 rounded-[2rem] border border-[#E0E7E9] shadow-sm">
-              <p className="text-[10px] font-black uppercase tracking-widest text-[#A0AEC0] mb-2">Total Pending Owed</p>
-              <p className="text-3xl font-black text-orange-500">MVR {globalTotalOwed.toFixed(0)}</p>
+          {/* TOTAL CARD SUMMARIES */}
+          <div className="grid grid-cols-2 gap-5 mb-8">
+            <div className="bg-white rounded-2xl p-5 border border-slate-200/60 shadow-[0_2px_12px_rgba(0,0,0,0.02)]">
+              <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2 flex items-center gap-1.5"><ArrowDownRight size={14} className="text-amber-500"/> Total Pending Owed</p>
+              <p className="text-2xl font-extrabold text-amber-600">MVR {globalTotalOwed.toLocaleString(undefined, {maximumFractionDigits:0})}</p>
             </div>
-            <div className="bg-[#3a5b5e] p-6 rounded-[2rem] shadow-xl text-white relative overflow-hidden">
-              <div className="absolute top-0 right-0 w-32 h-32 bg-white/5 rounded-full blur-2xl -mr-10 -mt-10" />
-              <p className="text-[10px] font-black uppercase tracking-widest opacity-60 mb-2">Total Collected</p>
-              <p className="text-3xl font-black text-green-300">MVR {globalTotalCollected.toFixed(0)}</p>
+            <div className="bg-white rounded-2xl p-5 border border-slate-200/60 shadow-[0_2px_12px_rgba(0,0,0,0.02)]">
+              <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2 flex items-center gap-1.5"><ArrowUpRight size={14} className="text-emerald-500"/> Total Collected</p>
+              <p className="text-2xl font-extrabold text-emerald-600">MVR {globalTotalCollected.toLocaleString(undefined, {maximumFractionDigits:0})}</p>
             </div>
           </div>
 
-          {/* CONSOLIDATED PENDING BY PERSON */}
+          {/* CONSOLIDATED PENDING PEOPLE */}
           {pendingPeople.length > 0 && (
             <div className="mb-10">
-              <h3 className="text-[11px] font-black uppercase tracking-[0.2em] text-[#A0AEC0] mb-4 pl-2">Pending By Person</h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              <h3 className="text-xs font-bold uppercase tracking-[0.12em] text-slate-400 mb-4 pl-1">Pending By Person</h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
                 {pendingPeople.map((person, idx) => {
                   const personKey = person.name.trim().toLowerCase();
                   
@@ -727,39 +825,48 @@ export default function SplitterPage() {
                   const isShared = sharedStatuses[personKey] === finalTotal;
 
                   return (
-                    <div key={idx} className="bg-white p-5 rounded-[2rem] border border-orange-100 shadow-sm flex flex-col justify-between">
-                      <div className="flex justify-between items-start mb-4">
+                    <div key={idx} className="bg-white p-5 rounded-2xl border border-slate-200/60 shadow-[0_2px_12px_rgba(0,0,0,0.02)] flex flex-col justify-between transition-all duration-200 hover:shadow-md">
+                      <div className="flex justify-between items-start mb-3">
                         <div>
-                          <div className="flex items-center gap-2 mb-1">
-                            <User size={16} className="text-[#A0AEC0]"/>
-                            <h4 className="font-black text-[#364d54] text-lg truncate">{person.name}</h4>
+                          <div className="flex items-center gap-2 mb-0.5">
+                            <User size={15} className="text-slate-400"/>
+                            <h4 className="font-bold text-slate-900 text-base max-w-[130px] truncate">{person.name}</h4>
                           </div>
-                          <p className="text-[10px] font-bold text-orange-400 uppercase tracking-widest">{person.details.length} pending event(s)</p>
+                          <p className="text-[10px] font-bold text-amber-600 uppercase tracking-wider">{person.details.length} pending event(s)</p>
                         </div>
                         <div className="text-right">
-                          <p className="text-[9px] font-black uppercase text-[#A0AEC0]">Total Due</p>
-                          <p className="font-black text-orange-500 text-lg">MVR {finalTotal.toFixed(0)}</p>
+                          <p className="text-[9px] font-bold uppercase text-slate-400">Total Due</p>
+                          <p className="font-extrabold text-amber-600 text-base">MVR {finalTotal.toFixed(0)}</p>
                         </div>
                       </div>
 
-                      <button onClick={() => setExpandedPerson(expandedPerson === personKey ? null : personKey)} className="text-[10px] font-bold text-[#5fa4ad] mb-3 flex items-center gap-1 uppercase tracking-widest active:scale-95 transition-transform">
-                        {expandedPerson === personKey ? <ChevronUp size={14}/> : <ChevronDown size={14}/>}
-                        {expandedPerson === personKey ? "Hide Details" : "View Details"}
-                      </button>
+                      <div className="flex justify-between items-center mb-4">
+                        <button onClick={() => setExpandedPerson(expandedPerson === personKey ? null : personKey)} className="text-[10px] font-bold text-sky-600 flex items-center gap-0.5 uppercase tracking-wider">
+                          {expandedPerson === personKey ? <ChevronUp size={12}/> : <ChevronDown size={12}/>}
+                          {expandedPerson === personKey ? "Hide Details" : "View Details"}
+                        </button>
+
+                        <button 
+                          onClick={() => markPersonFullyPaid(person, pendingPeople)}
+                          className="text-[10px] font-bold bg-emerald-50 text-emerald-600 border border-emerald-100 px-2 py-1 rounded-lg hover:bg-emerald-100 flex items-center gap-1 transition-colors"
+                        >
+                          <CheckSquare size={12}/> Settle All
+                        </button>
+                      </div>
 
                       {expandedPerson === personKey && (
-                        <div className="mb-4 bg-gray-50 p-3 rounded-xl border border-gray-100 space-y-3">
+                        <div className="mb-4 bg-slate-50/70 p-3 rounded-xl border border-slate-100 space-y-2.5 max-h-48 overflow-y-auto">
                           {person.details.map((d: any, dIdx: number) => (
-                            <div key={dIdx} className="flex justify-between items-center border-b border-gray-100 pb-2 last:border-0 last:pb-0">
-                              <div>
-                                <p className="font-bold text-[11px] text-[#364d54] uppercase">{d.title}</p>
-                                <p className="text-[9px] text-[#A0AEC0] font-black">{d.date}</p>
+                            <div key={dIdx} className="flex justify-between items-center border-b border-slate-100 pb-2 last:border-0 last:pb-0">
+                              <div className="max-w-[120px]">
+                                <p className="font-semibold text-xs text-slate-800 uppercase truncate">{d.title}</p>
+                                <p className="text-[9px] text-slate-400 font-bold">{d.date}</p>
                               </div>
                               <div className="flex items-center gap-2">
-                                <span className="font-black text-orange-500 text-xs">MVR {d.share.toFixed(0)}</span>
+                                <span className="font-bold text-amber-600 text-xs">MVR {d.share.toFixed(0)}</span>
                                 <button 
-                                  onClick={() => markAsPaidFromTile(d.eventId, d.participantId)}
-                                  className="bg-green-100 text-green-600 px-2 py-1.5 rounded-lg font-black text-[9px] uppercase tracking-widest hover:bg-green-200 active:scale-95 transition-transform"
+                                  onClick={() => markAsPaidFromTile(d.eventId, d.participantId, pendingPeople)}
+                                  className="bg-white border border-slate-200 text-slate-700 px-2 py-1 rounded-md font-bold text-[9px] uppercase tracking-wider hover:bg-slate-50 active:scale-95 transition-transform"
                                 >
                                   Pay
                                 </button>
@@ -769,21 +876,21 @@ export default function SplitterPage() {
                         </div>
                       )}
 
-                      <div className="mb-4 bg-gray-50 p-3 rounded-xl border border-gray-100">
+                      <div className="mb-4 bg-slate-50/50 p-3 rounded-xl border border-slate-100">
                         <div className="flex justify-between items-center mb-2">
-                          <span className="text-[9px] font-black uppercase tracking-widest text-[#A0AEC0]">Adjustments</span>
-                          <button onClick={() => addAdjustment(person.name)} className="text-[#5fa4ad] flex items-center gap-1 text-[9px] font-black uppercase tracking-widest active:scale-95 transition-transform"><Plus size={10}/> Add</button>
+                          <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400">Adjustments</span>
+                          <button onClick={() => addAdjustment(person.name)} className="text-sky-600 flex items-center gap-0.5 text-[9px] font-bold uppercase tracking-wider active:scale-95 transition-transform"><Plus size={10}/> Add</button>
                         </div>
                         <div className="space-y-2">
                           {personAdjs.map(adj => (
-                            <div key={adj.id} className="flex gap-2 animate-in fade-in">
+                            <div key={adj.id} className="flex gap-1 items-center animate-in fade-in">
                               <select 
                                 value={adj.type} 
                                 onChange={e => {
                                   updateAdjustmentLocal(adj.id, 'type', e.target.value);
                                   saveAdjustmentDB(adj.id, 'type', e.target.value);
                                 }} 
-                                className={`w-24 border border-[#E0E7E9] rounded-lg p-2 text-[10px] font-black uppercase tracking-widest focus:ring-1 focus:ring-orange-300 ${adj.type === 'payment' ? 'bg-green-50 text-green-600' : 'bg-orange-50 text-orange-600'}`}
+                                className={`w-20 border border-slate-200 rounded-lg p-1.5 text-[9px] font-bold uppercase tracking-wider focus:outline-none ${adj.type === 'payment' ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600'}`}
                               >
                                 <option value="charge">+ Debt</option>
                                 <option value="payment">- Recv</option>
@@ -793,7 +900,7 @@ export default function SplitterPage() {
                                 value={adj.desc_text || ''} 
                                 onChange={e => updateAdjustmentLocal(adj.id, 'desc_text', e.target.value)} 
                                 onBlur={e => saveAdjustmentDB(adj.id, 'desc_text', e.target.value)}
-                                className="flex-grow w-full bg-white border border-[#E0E7E9] rounded-lg p-2 text-xs font-bold focus:ring-1 focus:ring-orange-300" 
+                                className="flex-grow min-w-[50px] bg-white border border-slate-200 rounded-lg p-1 text-xs font-semibold focus:outline-none" 
                               />
                               <input 
                                 placeholder="MVR" 
@@ -801,9 +908,9 @@ export default function SplitterPage() {
                                 value={adj.amount} 
                                 onChange={e => updateAdjustmentLocal(adj.id, 'amount', e.target.value)} 
                                 onBlur={e => saveAdjustmentDB(adj.id, 'amount', e.target.value)}
-                                className="w-20 bg-white border border-[#E0E7E9] rounded-lg p-2 text-xs font-bold text-center focus:ring-1 focus:ring-orange-300" 
+                                className="w-14 bg-white border border-slate-200 rounded-lg p-1 text-xs font-semibold text-center focus:outline-none" 
                               />
-                              <button onClick={() => removeAdjustmentDB(adj.id)} className="text-gray-300 hover:text-red-400"><Trash2 size={14}/></button>
+                              <button onClick={() => removeAdjustmentDB(adj.id)} className="text-slate-300 hover:text-rose-500"><Trash2 size={13}/></button>
                             </div>
                           ))}
                         </div>
@@ -811,9 +918,9 @@ export default function SplitterPage() {
 
                       <button 
                         onClick={() => sendPersonalInvoice(person, personAdjs, finalTotal)} 
-                        className={`w-full py-3 rounded-xl font-black text-[10px] uppercase tracking-widest transition-colors flex justify-center items-center gap-2 ${isShared ? 'bg-green-100 text-green-600 hover:bg-green-200' : 'bg-[#e0f2fe] text-[#0284c7] hover:bg-[#bae6fd]'}`}
+                        className={`w-full py-2.5 rounded-xl font-bold text-[10px] uppercase tracking-wider transition-all flex justify-center items-center gap-1.5 ${isShared ? 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100' : 'bg-sky-50 text-sky-600 hover:bg-sky-100'}`}
                       >
-                        {isShared ? <><CheckCircle2 size={14}/> Shared ✅</> : <><Send size={14}/> Send WA Invoice</>}
+                        {isShared ? <><CheckCircle2 size={13}/> Shared ✅</> : <><Send size={13}/> Send WA Invoice</>}
                       </button>
                     </div>
                   );
@@ -822,13 +929,13 @@ export default function SplitterPage() {
             </div>
           )}
 
-          <h3 className="text-[11px] font-black uppercase tracking-[0.2em] text-[#A0AEC0] mb-4 pl-2">Events Ledger</h3>
+          <h3 className="text-xs font-bold uppercase tracking-[0.12em] text-slate-400 mb-4 pl-1">Events Ledger</h3>
           
           <div className="space-y-4">
             {events.length === 0 && (
-              <div className="text-center py-20 bg-white rounded-[2rem] border border-dashed border-[#A0AEC0]">
-                <Calculator size={48} className="mx-auto text-[#E0E7E9] mb-4" />
-                <p className="font-bold text-[#A0AEC0]">No splits recorded yet.</p>
+              <div className="text-center py-20 bg-white rounded-2xl border border-dashed border-slate-200 shadow-[0_2px_12px_rgba(0,0,0,0.02)]">
+                <Calculator size={44} className="mx-auto text-slate-300 mb-3" />
+                <p className="font-semibold text-slate-400 text-sm">No splits recorded yet.</p>
               </div>
             )}
 
@@ -844,87 +951,87 @@ export default function SplitterPage() {
               const masterGrandTotal = masterSubtotal + masterGST - masterDisc;
 
               return (
-                <div key={ev.id} className={`bg-white rounded-[2rem] border border-[#E0E7E9] shadow-sm transition-all duration-300 ${isExpanded ? 'ring-2 ring-[#5fa4ad]/20' : ''}`}>
+                <div key={ev.id} className={`bg-white rounded-2xl border border-slate-200/60 shadow-[0_2px_12px_rgba(0,0,0,0.02)] transition-all duration-200 ${isExpanded ? 'ring-1 ring-slate-900 shadow-md' : ''}`}>
                   
-                  <div className="p-5 flex items-center justify-between cursor-pointer" onClick={() => setExpanded(prev => ({...prev, [ev.id]: !isExpanded}))}>
-                    <div className="flex items-center gap-4">
-                      <div className="w-12 h-12 rounded-2xl flex items-center justify-center text-white shadow-sm bg-[#5fa4ad]">
-                        <Calculator size={20}/>
+                  <div className="p-4 flex items-center justify-between cursor-pointer select-none" onClick={() => setExpanded(prev => ({...prev, [ev.id]: !isExpanded}))}>
+                    <div className="flex items-center gap-4.5">
+                      <div className="w-11 h-11 rounded-xl flex items-center justify-center border border-slate-100 shadow-sm bg-slate-50 text-slate-800">
+                        <Calculator size={18}/>
                       </div>
                       <div>
-                        <h3 className="font-black text-lg text-[#364d54]">{ev.title}</h3>
-                        <p className="text-[10px] font-bold text-[#A0AEC0] uppercase tracking-widest">{ev.date} • {ev.participants.length} People</p>
+                        <h3 className="font-bold text-base text-slate-950">{ev.title}</h3>
+                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{ev.date} • {ev.participants.length} People</p>
                       </div>
                     </div>
                     
                     <div className="flex items-center gap-6">
                       <div className="hidden sm:block text-right">
-                        <p className="text-[10px] font-black uppercase text-[#A0AEC0]">Total / Collected</p>
-                        <p className={`font-black text-sm ${isFullyPaid ? 'text-green-500' : 'text-[#364d54]'}`}>
+                        <p className="text-[10px] font-bold uppercase text-slate-400">Total / Collected</p>
+                        <p className={`font-extrabold text-sm ${isFullyPaid ? 'text-emerald-600' : 'text-slate-800'}`}>
                           {collected.toFixed(0)} / {eventTotal.toFixed(0)}
                         </p>
                       </div>
-                      <div className="text-[#A0AEC0]">
-                        {isExpanded ? <ChevronUp size={24}/> : <ChevronDown size={24}/>}
+                      <div className="text-slate-400">
+                        {isExpanded ? <ChevronUp size={20}/> : <ChevronDown size={20}/>}
                       </div>
                     </div>
                   </div>
 
                   {isExpanded && (
-                    <div className="p-5 border-t border-[#E0E7E9] bg-[#F8FAFB] rounded-b-[2rem]">
+                    <div className="p-5 border-t border-slate-100 bg-slate-50/50 rounded-b-2xl">
                       
-                      {/* MASTER INVOICE SECTION */}
-                      <div className="bg-white rounded-2xl border border-[#E0E7E9] overflow-hidden mb-6 shadow-sm">
-                        <div className="flex justify-between items-center p-4 border-b border-[#E0E7E9] bg-[#F0F4F8]">
+                      {/* MASTER INVOICE CONTAINER */}
+                      <div className="bg-white rounded-xl border border-slate-200/60 overflow-hidden mb-6 shadow-sm">
+                        <div className="flex justify-between items-center p-3.5 border-b border-slate-100 bg-slate-50">
                           <div className="flex items-center gap-2">
-                            <Package size={16} className="text-[#5fa4ad]"/>
-                            <h4 className="text-[10px] font-black uppercase text-[#364d54] tracking-widest">Master Invoice</h4>
-                            <span className="ml-2 text-[9px] font-black text-[#5fa4ad] bg-white px-2 py-1 rounded-md border border-[#E0E7E9]">Grand Total: {masterGrandTotal.toFixed(2)} MVR</span>
+                            <Package size={15} className="text-slate-700"/>
+                            <h4 className="text-[10px] font-bold uppercase text-slate-700 tracking-wider">Master Invoice</h4>
+                            <span className="ml-2 text-[9px] font-bold text-slate-800 bg-white px-2 py-0.5 rounded border border-slate-200 shadow-2xl">Grand Total: {masterGrandTotal.toFixed(2)} MVR</span>
                           </div>
-                          <button onClick={() => addInvoiceItem(ev.id)} className="text-[#5fa4ad] font-bold text-[10px] uppercase flex items-center gap-1 bg-white px-3 py-1.5 rounded-lg active:scale-95 transition-transform border border-[#E0E7E9]">
-                            <Plus size={12}/> Add Master Item
+                          <button onClick={() => addInvoiceItem(ev.id)} className="text-slate-700 font-bold text-[9px] uppercase flex items-center gap-0.5 bg-white px-2.5 py-1.5 rounded-lg border border-slate-200 active:scale-95 transition-transform shadow-2xl">
+                            <Plus size={11}/> Add Master Item
                           </button>
                         </div>
                         
                         <div className="p-4 space-y-3">
                           {(ev.invoiceItems || []).map((inv: any) => (
                             <div key={inv.id} className="flex gap-2 items-center">
-                              <input type="text" placeholder="Item Name (e.g. Adult Jersey)" value={inv.desc} onChange={e => updateInvoiceItem(ev.id, inv.id, 'desc', e.target.value)} className="flex-grow bg-gray-50 border-none p-3 rounded-xl text-sm font-bold focus:ring-2 focus:ring-[#5fa4ad]"/>
-                              <input type="number" placeholder="Qty" value={inv.qty} onChange={e => updateInvoiceItem(ev.id, inv.id, 'qty', e.target.value)} className="w-20 bg-gray-50 border-none p-3 rounded-xl text-sm font-bold text-center focus:ring-2 focus:ring-[#5fa4ad]"/>
-                              <input type="number" placeholder="Price/ea" value={inv.price} onChange={e => updateInvoiceItem(ev.id, inv.id, 'price', e.target.value)} className="w-28 bg-gray-50 border-none p-3 rounded-xl text-sm font-bold focus:ring-2 focus:ring-[#5fa4ad]"/>
-                              <button onClick={() => removeInvoiceItem(ev.id, inv.id)} className="text-gray-300 hover:text-red-400 p-2"><Trash2 size={16}/></button>
+                              <input type="text" placeholder="Item Name (e.g. Adult Jersey)" value={inv.desc} onChange={e => updateInvoiceItem(ev.id, inv.id, 'desc', e.target.value)} className="flex-grow bg-slate-50 border border-slate-100 p-2 rounded-xl text-xs font-semibold focus:outline-none"/>
+                              <input type="number" placeholder="Qty" value={inv.qty} onChange={e => updateInvoiceItem(ev.id, inv.id, 'qty', e.target.value)} className="w-16 bg-slate-50 border border-slate-100 p-2 rounded-xl text-xs font-semibold text-center focus:outline-none"/>
+                              <input type="number" placeholder="Price/ea" value={inv.price} onChange={e => updateInvoiceItem(ev.id, inv.id, 'price', e.target.value)} className="w-24 bg-slate-50 border border-slate-100 p-2 rounded-xl text-xs font-semibold focus:outline-none"/>
+                              <button onClick={() => removeInvoiceItem(ev.id, inv.id)} className="text-slate-300 hover:text-rose-500 p-1"><Trash2 size={15}/></button>
                             </div>
                           ))}
 
-                          <div className="flex flex-wrap sm:flex-nowrap gap-4 border-t border-[#E0E7E9] pt-4 mt-2">
+                          <div className="flex flex-wrap sm:flex-nowrap gap-4 border-t border-slate-100 pt-4 mt-2">
                             <div className="flex flex-col w-full sm:w-1/3">
-                              <label className="text-[9px] font-black uppercase tracking-widest text-[#A0AEC0] mb-1 pl-1">GST (%)</label>
-                              <input type="number" value={ev.gst} onChange={e => updateEvent(ev.id, 'gst', e.target.value)} className="bg-gray-50 border-none p-3 rounded-xl font-bold focus:ring-2 focus:ring-[#5fa4ad]" placeholder="0"/>
+                              <label className="text-[9px] font-bold uppercase tracking-wider text-slate-400 mb-1 pl-0.5">GST (%)</label>
+                              <input type="number" value={ev.gst} onChange={e => updateEvent(ev.id, 'gst', e.target.value)} className="bg-slate-50 border border-slate-100 p-2 rounded-xl text-xs font-semibold focus:outline-none" placeholder="0"/>
                             </div>
                             <div className="flex flex-col w-full sm:w-1/3">
-                              <label className="text-[9px] font-black uppercase tracking-widest text-[#A0AEC0] mb-1 pl-1">Discount (MVR)</label>
-                              <input type="number" value={ev.discount} onChange={e => updateEvent(ev.id, 'discount', e.target.value)} className="bg-gray-50 border-none p-3 rounded-xl font-bold focus:ring-2 focus:ring-[#5fa4ad]" placeholder="0"/>
+                              <label className="text-[9px] font-bold uppercase tracking-wider text-slate-400 mb-1 pl-0.5">Discount (MVR)</label>
+                              <input type="number" value={ev.discount} onChange={e => updateEvent(ev.id, 'discount', e.target.value)} className="bg-slate-50 border border-slate-100 p-2 rounded-xl text-xs font-semibold focus:outline-none" placeholder="0"/>
                             </div>
                             <div className="flex flex-col w-full sm:w-1/3 justify-end">
-                              <button onClick={() => moveUnclaimedToShared(ev.id)} className="w-full h-[44px] bg-[#e0f2fe] text-[#0284c7] border border-blue-100 rounded-xl font-black text-[10px] uppercase tracking-widest shadow-sm hover:bg-blue-100 active:scale-95 transition-transform flex items-center justify-center gap-2">
-                                <Calculator size={14}/> Add Unclaimed to Shared
+                              <button onClick={() => moveUnclaimedToShared(ev.id)} className="w-full h-9 bg-sky-50 text-sky-600 border border-sky-100 rounded-xl font-bold text-[9px] uppercase tracking-wider shadow-sm hover:bg-sky-100 active:scale-95 transition-transform flex items-center justify-center gap-1">
+                                <Calculator size={12}/> Add Unclaimed to Shared
                               </button>
                             </div>
                           </div>
                         </div>
 
-                        {/* BALANCE CHECKER */}
+                        {/* INVENTORY CHECKER */}
                         {(ev.invoiceItems || []).length > 0 && (
-                          <div className="bg-orange-50/50 p-4 border-t border-orange-100/50">
-                            <h5 className="text-[9px] font-black uppercase tracking-widest text-orange-500 mb-3">Inventory Balance Checker</h5>
+                          <div className="bg-amber-50/30 p-4 border-t border-amber-100/50">
+                            <h5 className="text-[9px] font-bold uppercase tracking-wider text-amber-600 mb-2.5">Inventory Balance Checker</h5>
                             <div className="space-y-2">
                               {ev.invoiceItems.map((inv: any) => {
                                 const claimed = ev.participants.reduce((sum: number, p: any) => sum + (p.items || []).filter((i: any) => i.desc.trim().toLowerCase() === inv.desc.trim().toLowerCase()).reduce((s: number, i: any) => s + (parseFloat(i.qty) || 1), 0), 0);
                                 const remaining = (parseFloat(inv.qty) || 0) - claimed;
                                 return (
-                                  <div key={inv.id} className="flex justify-between items-center text-xs font-bold text-[#364d54] bg-white p-2.5 rounded-lg shadow-sm border border-orange-100/50">
+                                  <div key={inv.id} className="flex justify-between items-center text-xs font-semibold text-slate-700 bg-white p-2.5 rounded-lg shadow-sm border border-slate-100">
                                     <span>{inv.desc || "Unnamed Item"} (Total: {inv.qty || 0})</span>
-                                    <span className={`px-2 py-1 rounded-md text-[9px] uppercase tracking-widest ${remaining < 0 ? 'bg-red-100 text-red-600' : remaining === 0 ? 'bg-green-100 text-green-600' : 'bg-orange-100 text-orange-600'}`}>
+                                    <span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider ${remaining < 0 ? 'bg-rose-50 text-rose-600' : remaining === 0 ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600'}`}>
                                       {remaining === 0 ? 'All Claimed ✅' : remaining < 0 ? `Over-claimed by ${Math.abs(remaining)}` : `${remaining} left`}
                                     </span>
                                   </div>
@@ -937,43 +1044,41 @@ export default function SplitterPage() {
 
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
                         <div className="flex flex-col">
-                          <label className="text-[9px] font-black uppercase tracking-widest text-[#A0AEC0] mb-1 pl-1">Event Title</label>
-                          <input type="text" value={ev.title} onChange={e => updateEvent(ev.id, 'title', e.target.value)} className="bg-white border-none p-3 rounded-xl font-bold focus:ring-2 focus:ring-[#5fa4ad]"/>
+                          <label className="text-[9px] font-bold uppercase tracking-wider text-slate-400 mb-1 pl-0.5">Event Title</label>
+                          <input type="text" value={ev.title} onChange={e => updateEvent(ev.id, 'title', e.target.value)} className="bg-white border border-slate-200 p-2.5 rounded-xl text-xs font-semibold focus:outline-none"/>
                         </div>
                         <div className="flex flex-col">
-                          <label className="text-[9px] font-black uppercase tracking-widest text-[#A0AEC0] mb-1 pl-1">Date</label>
-                          <input type="date" value={ev.date} onChange={e => updateEvent(ev.id, 'date', e.target.value)} className="bg-white border-none p-3 rounded-xl font-bold focus:ring-2 focus:ring-[#5fa4ad]"/>
+                          <label className="text-[9px] font-bold uppercase tracking-wider text-slate-400 mb-1 pl-0.5">Date</label>
+                          <input type="date" value={ev.date} onChange={e => updateEvent(ev.id, 'date', e.target.value)} className="bg-white border border-slate-200 p-2.5 rounded-xl text-xs font-semibold focus:outline-none"/>
                         </div>
-                        
                         <div className="flex gap-2">
                           <div className="flex flex-col w-1/2">
-                            <label className="text-[9px] font-black uppercase tracking-widest text-blue-500 mb-1 pl-1">Shared Items (Equally)</label>
-                            <input type="number" value={ev.totalBill} onChange={e => updateEvent(ev.id, 'totalBill', e.target.value)} className="bg-white border-none p-3 rounded-xl font-bold focus:ring-2 focus:ring-blue-400 text-blue-600" placeholder="0"/>
+                            <label className="text-[9px] font-bold uppercase tracking-wider text-sky-600 mb-1 pl-0.5">Shared Items</label>
+                            <input type="number" value={ev.totalBill} onChange={e => updateEvent(ev.id, 'totalBill', e.target.value)} className="bg-white border border-slate-200 p-2.5 rounded-xl text-xs font-semibold focus:outline-none text-sky-600" placeholder="0"/>
                           </div>
                           <div className="flex flex-col w-1/2">
-                            <label className="text-[9px] font-black uppercase tracking-widest text-orange-400 mb-1 pl-1">Delivery/Fees (Equally)</label>
-                            <input type="number" value={ev.delivery} onChange={e => updateEvent(ev.id, 'delivery', e.target.value)} className="bg-white border-none p-3 rounded-xl font-bold focus:ring-2 focus:ring-orange-400 text-orange-600" placeholder="0"/>
+                            <label className="text-[9px] font-bold uppercase tracking-wider text-amber-600 mb-1 pl-0.5">Delivery/Fees</label>
+                            <input type="number" value={ev.delivery} onChange={e => updateEvent(ev.id, 'delivery', e.target.value)} className="bg-white border border-slate-200 p-2.5 rounded-xl text-xs font-semibold focus:outline-none text-amber-600" placeholder="0"/>
                           </div>
                         </div>
                       </div>
 
-                      <div className="bg-white rounded-2xl border border-[#E0E7E9] overflow-hidden mb-6">
-                        <div className="flex justify-between items-center p-4 border-b border-[#E0E7E9] bg-gray-50">
-                          <h4 className="text-[10px] font-black uppercase text-[#364d54] tracking-widest">Participants</h4>
-                          <button onClick={() => addParticipant(ev.id)} className="text-[#5fa4ad] font-bold text-[10px] uppercase flex items-center gap-1 bg-[#e0f2fe] px-3 py-1.5 rounded-lg active:scale-95 transition-transform">
-                            <Plus size={12}/> Add Person
+                      {/* PARTICIPANT ENTRY CARDS */}
+                      <div className="bg-white rounded-xl border border-slate-200/60 overflow-hidden mb-6">
+                        <div className="flex justify-between items-center p-3.5 border-b border-slate-100 bg-slate-50">
+                          <h4 className="text-[10px] font-bold uppercase text-slate-700 tracking-wider">Participants</h4>
+                          <button onClick={() => addParticipant(ev.id)} className="text-sky-600 bg-sky-50 font-bold text-[9px] uppercase flex items-center gap-0.5 px-2.5 py-1.5 rounded-lg border border-sky-100 active:scale-95 transition-transform">
+                            <Plus size={11}/> Add Person
                           </button>
                         </div>
                         
-                        <div className="divide-y divide-[#E0E7E9]">
+                        <div className="divide-y divide-slate-100">
                           {ev.participants.map((p: any) => {
                             const share = calculateShare(ev, p);
-                            
                             return (
-                              <div key={p.id} className="p-3 flex flex-col gap-3">
-                                
+                              <div key={p.id} className="p-4 flex flex-col gap-3">
                                 <div className="flex flex-wrap sm:flex-nowrap items-center gap-2">
-                                  <div className="w-6 h-6 rounded-full bg-gray-100 flex items-center justify-center text-[10px] font-bold text-gray-400 flex-shrink-0">P</div>
+                                  <div className="w-6 h-6 rounded-full bg-slate-100 flex items-center justify-center text-[10px] font-bold text-slate-400 flex-shrink-0">P</div>
                                   
                                   <div className="relative flex-grow min-w-[80px]">
                                     <input 
@@ -986,52 +1091,51 @@ export default function SplitterPage() {
                                       }} 
                                       onFocus={() => setFocusedParticipantId(p.id)}
                                       onBlur={() => setTimeout(() => setFocusedParticipantId(null), 200)}
-                                      className="w-full bg-transparent border-none focus:ring-0 font-bold text-sm p-0"
+                                      className="w-full bg-transparent border-none focus:outline-none font-bold text-sm p-0"
                                     />
                                     {focusedParticipantId === p.id && directory.length > 0 && (
-                                      <div className="absolute top-full left-0 mt-2 w-48 bg-white border border-[#E0E7E9] shadow-2xl rounded-xl z-50 max-h-48 overflow-y-auto">
+                                      <div className="absolute top-full left-0 mt-2 w-48 bg-white border border-slate-200 shadow-xl rounded-xl z-50 max-h-48 overflow-y-auto">
                                         {directory.filter(user => user.name.toLowerCase().includes(p.name.toLowerCase()) || user.nickname.toLowerCase().includes(p.name.toLowerCase())).map(user => (
                                           <div 
                                             key={user.id} 
-                                            className="p-3 hover:bg-[#F8FAFB] cursor-pointer border-b border-[#E0E7E9] last:border-0"
+                                            className="p-3 hover:bg-slate-50 cursor-pointer border-b border-slate-100 last:border-0"
                                             onClick={() => {
                                               updateParticipant(ev.id, p.id, "name", user.name);
                                               setFocusedParticipantId(null);
                                             }}
                                           >
-                                            <p className="text-sm font-bold text-[#364d54]">{user.name}</p>
-                                            {user.nickname && <p className="text-[10px] text-[#A0AEC0] uppercase tracking-widest">{user.nickname}</p>}
+                                            <p className="text-xs font-bold text-slate-800">{user.name}</p>
+                                            {user.nickname && <p className="text-[9px] text-slate-400 font-bold uppercase tracking-wider">{user.nickname}</p>}
                                           </div>
                                         ))}
                                       </div>
                                     )}
                                   </div>
                                   
-                                  <div className="w-16 text-right font-black text-sm text-[#364d54] mr-1">
-                                    <span className="text-[9px] text-[#A0AEC0] mr-0.5">MVR</span>{share.toFixed(0)}
+                                  <div className="w-20 text-right font-extrabold text-sm text-slate-800 mr-2">
+                                    <span className="text-[9px] text-slate-400 mr-0.5 font-bold">MVR</span>{share.toFixed(0)}
                                   </div>
 
                                   <button 
                                     onClick={() => updateParticipant(ev.id, p.id, "hasPaid", !p.hasPaid)}
-                                    className={`px-2 py-2 rounded-lg text-[8px] font-black uppercase tracking-widest transition-colors w-16 text-center ${p.hasPaid ? 'bg-green-100 text-green-600' : 'bg-orange-50 text-orange-500 hover:bg-orange-100'}`}
+                                    className={`px-2 py-1.5 rounded-lg text-[9px] font-bold uppercase tracking-wider transition-colors w-16 text-center ${p.hasPaid ? 'bg-emerald-50 text-emerald-600 border border-emerald-100' : 'bg-amber-50 text-amber-600 border border-amber-100 hover:bg-amber-100'}`}
                                   >
                                     {p.hasPaid ? 'Paid' : 'Pending'}
                                   </button>
                                   
-                                  <button onClick={() => removeParticipant(ev.id, p.id)} className="text-red-300 hover:text-red-500 p-1"><Trash2 size={16}/></button>
+                                  <button onClick={() => removeParticipant(ev.id, p.id)} className="text-slate-300 hover:text-rose-500 p-1"><Trash2 size={15}/></button>
                                 </div>
 
                                 <div className="pl-8 flex gap-2">
                                   <button 
                                     onClick={() => updateParticipant(ev.id, p.id, "paysMain", p.paysMain === false ? true : false)}
-                                    className={`px-2 py-1 rounded-md text-[8px] font-black uppercase tracking-widest transition-colors text-center ${p.paysMain !== false ? 'bg-blue-50 text-blue-500' : 'bg-gray-100 text-gray-400 line-through'}`}
+                                    className={`px-2 py-0.5 rounded-md text-[8px] font-bold uppercase tracking-wider transition-colors text-center ${p.paysMain !== false ? 'bg-sky-50 text-sky-600' : 'bg-slate-100 text-slate-400 line-through'}`}
                                   >
                                     {p.paysMain !== false ? 'Bill: Yes' : 'Bill: No'}
                                   </button>
-                                  
                                   <button 
                                     onClick={() => updateParticipant(ev.id, p.id, "paysDelivery", p.paysDelivery === false ? true : false)}
-                                    className={`px-2 py-1 rounded-md text-[8px] font-black uppercase tracking-widest transition-colors text-center ${p.paysDelivery !== false ? 'bg-indigo-50 text-indigo-500' : 'bg-gray-100 text-gray-400 line-through'}`}
+                                    className={`px-2 py-0.5 rounded-md text-[8px] font-bold uppercase tracking-wider transition-colors text-center ${p.paysDelivery !== false ? 'bg-indigo-50 text-indigo-600' : 'bg-slate-100 text-slate-400 line-through'}`}
                                   >
                                     {p.paysDelivery !== false ? 'Deliv: Yes' : 'Deliv: No'}
                                   </button>
@@ -1043,26 +1147,27 @@ export default function SplitterPage() {
                                       <input 
                                         type="text" 
                                         placeholder="Item Name" 
+                                        maxLength={18}
                                         list={`master-items-${ev.id}`}
                                         value={item.desc} 
                                         onChange={e => updateParticipantItem(ev.id, p.id, item.id, "desc", e.target.value)} 
-                                        className="flex-grow bg-gray-50 rounded-lg border-none focus:ring-1 focus:ring-[#5fa4ad] text-xs font-bold p-2" 
+                                        className="flex-grow bg-slate-50 rounded-lg border border-slate-100 focus:outline-none text-xs font-semibold p-1.5" 
                                       />
                                       <input 
                                         type="number" 
                                         placeholder="Qty" 
                                         value={item.qty} 
                                         onChange={e => updateParticipantItem(ev.id, p.id, item.id, "qty", e.target.value)} 
-                                        className="w-16 bg-gray-50 rounded-lg border-none focus:ring-1 focus:ring-[#5fa4ad] text-xs font-bold p-2 text-center" 
+                                        className="w-12 bg-slate-50 rounded-lg border border-slate-100 focus:outline-none text-xs font-semibold p-1.5 text-center" 
                                       />
                                       <input 
                                         type="number" 
                                         placeholder="Price/ea" 
                                         value={item.price} 
                                         onChange={e => updateParticipantItem(ev.id, p.id, item.id, "price", e.target.value)} 
-                                        className="w-20 bg-gray-50 rounded-lg border-none focus:ring-1 focus:ring-[#5fa4ad] text-xs font-bold p-2 text-center" 
+                                        className="w-16 bg-slate-50 rounded-lg border border-slate-100 focus:outline-none text-xs font-semibold p-1.5 text-center" 
                                       />
-                                      <button onClick={() => removeParticipantItem(ev.id, p.id, item.id)} className="text-gray-300 hover:text-red-400 p-1"><X size={14}/></button>
+                                      <button onClick={() => removeParticipantItem(ev.id, p.id, item.id)} className="text-slate-300 hover:text-rose-500 p-1"><X size={13}/></button>
                                     </div>
                                   ))}
                                   
@@ -1072,11 +1177,10 @@ export default function SplitterPage() {
                                     ))}
                                   </datalist>
 
-                                  <button onClick={() => addParticipantItem(ev.id, p.id)} className="text-[#A0AEC0] font-bold text-[9px] uppercase tracking-widest flex items-center gap-1 mt-1 hover:text-[#5fa4ad]">
-                                    <Plus size={10}/> Add Personal Item
+                                  <button onClick={() => addParticipantItem(ev.id, p.id)} className="text-slate-400 font-bold text-[9px] uppercase tracking-wider flex items-center gap-0.5 mt-1 hover:text-slate-700">
+                                    <Plus size={9}/> Add Personal Item
                                   </button>
                                 </div>
-
                               </div>
                             );
                           })}
@@ -1084,15 +1188,12 @@ export default function SplitterPage() {
                       </div>
 
                       <div className="flex flex-wrap sm:flex-nowrap justify-between items-center gap-4">
-                        <button onClick={() => deleteEvent(ev.id)} className="text-red-400 text-[10px] font-bold uppercase flex items-center gap-1 hover:text-red-600">
-                          <Trash2 size={14}/> Delete Event
+                        <button onClick={() => deleteEvent(ev.id)} className="text-rose-500 text-[10px] font-bold uppercase flex items-center gap-0.5 hover:text-rose-700">
+                          <Trash2 size={13}/> Delete Event
                         </button>
-                        
-                        <div className="flex gap-2 w-full sm:w-auto">
-                          <button onClick={() => saveEvent(ev.id)} className="w-full sm:w-auto h-12 px-8 rounded-xl bg-[#3a5b5e] text-white font-black text-[10px] uppercase tracking-widest shadow-md active:scale-95 transition-all">
-                            Save Event
-                          </button>
-                        </div>
+                        <button onClick={() => saveEvent(ev.id)} className="w-full sm:w-auto h-10 px-6 rounded-xl bg-slate-900 text-white font-semibold text-xs uppercase tracking-wider shadow-sm active:scale-95 transition-all">
+                          Save Event
+                        </button>
                       </div>
 
                     </div>
@@ -1101,101 +1202,101 @@ export default function SplitterPage() {
               );
             })}
           </div>
-
         </div>
 
-        <nav className="lg:hidden fixed bottom-6 left-1/2 -translate-x-1/2 w-[95%] max-w-[400px] h-16 bg-white shadow-[0_10px_40px_rgba(0,0,0,0.1)] rounded-full border border-gray-100 flex justify-around items-center px-4 z-[100]">
-          <Link href="/" className="text-gray-400 hover:text-[#3a5b5e] transition-colors"><Wallet size={20} /></Link>
-          <Link href="/tracker" className="text-gray-400 hover:text-[#3a5b5e] transition-colors"><Banknote size={20} /></Link>
-          <Link href="/splitter" className="text-[#3a5b5e]"><Calculator size={24} className="bg-[#e0f2fe] p-1.5 rounded-xl" /></Link>
-          <Link href="/shop-clearing" className="text-gray-400 hover:text-[#3a5b5e] transition-colors"><ShoppingCart size={20} /></Link>
-          <Link href="/analytics" className="text-gray-400 hover:text-[#3a5b5e] transition-colors"><PieChart size={20} /></Link>
+        {/* 2026 LIGHT PORTABLE BOTTOM NAV FOR MOBILE HUB */}
+        <nav className="lg:hidden fixed bottom-5 left-1/2 -translate-x-1/2 w-[92%] max-w-[360px] h-14 bg-white/90 border border-slate-200/60 shadow-[0_8px_30px_rgba(0,0,0,0.06)] rounded-xl flex justify-around items-center px-2 z-[100] backdrop-blur-md">
+          <Link href="/" className="text-slate-400 hover:text-slate-800 transition-colors active:scale-95"><Wallet size={18} /></Link>
+          <Link href="/tracker" className="text-slate-400 hover:text-slate-800 transition-colors active:scale-95"><Banknote size={18} /></Link>
+          <Link href="/splitter" className="text-slate-900 transition-transform duration-200 active:scale-95"><Calculator size={18} className="bg-slate-100 p-2 w-8 h-8 rounded-lg" /></Link>
+          <Link href="/shop-clearing" className="text-slate-400 hover:text-slate-800 transition-colors active:scale-95"><ShoppingCart size={18} /></Link>
+          <Link href="/myself" className="text-slate-400 hover:text-slate-800 transition-colors active:scale-95"><User size={18} /></Link>
         </nav>
       </div>
 
       {showBankModal && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[300] flex justify-center items-end sm:items-center">
-          <div className="bg-white w-full max-w-md rounded-t-[2rem] sm:rounded-[2rem] p-6 animate-in slide-in-from-bottom-8">
-            <div className="flex justify-between items-center mb-6">
-              <h3 className="text-lg font-black tracking-tight">Set MVR Bank Account</h3>
-              <button onClick={() => setShowBankModal(false)} className="bg-gray-100 p-2 rounded-full text-gray-500 hover:bg-gray-200"><X size={16}/></button>
+        <div className="fixed inset-0 bg-slate-950/40 backdrop-blur-xs z-[300] flex justify-center items-end sm:items-center p-0 sm:p-4 animate-in fade-in duration-200">
+          <div className="bg-white w-full max-w-sm rounded-t-2xl sm:rounded-2xl p-5 shadow-2xl flex flex-col max-h-[90vh]">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-base font-bold tracking-tight text-slate-900">Set MVR Bank Account</h3>
+              <button onClick={() => setShowBankModal(false)} className="bg-slate-50 p-1.5 rounded-full text-slate-400 hover:bg-slate-100"><X size={15}/></button>
             </div>
-            <p className="text-xs text-[#A0AEC0] mb-6">This account will be attached to all MVR Splitter invoices.</p>
-            <div className="space-y-3 mb-6">
-              <input type="text" placeholder="Bank Name (e.g. BML MVR)" value={mvrBankName} onChange={e => setMvrBankName(e.target.value)} className="w-full bg-gray-50 border-none p-4 rounded-2xl font-bold focus:ring-2 focus:ring-[#5fa4ad]" />
-              <input type="text" placeholder="Account Number" value={mvrBankNo} onChange={e => setMvrBankNo(e.target.value)} className="w-full bg-gray-50 border-none p-4 rounded-2xl font-bold focus:ring-2 focus:ring-[#5fa4ad]" />
+            <p className="text-xs text-slate-400 mb-4">Account metadata bound directly onto active WhatsApp invoices.</p>
+            <div className="space-y-2.5 mb-5">
+              <input type="text" placeholder="Bank Name (e.g. BML MVR)" value={mvrBankName} onChange={e => setMvrBankName(e.target.value)} className="w-full bg-slate-50 border border-slate-100 p-3 rounded-xl text-xs font-semibold focus:outline-none" />
+              <input type="text" placeholder="Account Number" value={mvrBankNo} onChange={e => setMvrBankNo(e.target.value)} className="w-full bg-slate-50 border border-slate-100 p-3 rounded-xl text-xs font-semibold focus:outline-none" />
             </div>
-            <button onClick={saveMvrBank} className="w-full bg-[#3a5b5e] text-white p-4 rounded-2xl font-black uppercase tracking-widest shadow-lg active:scale-95 transition-transform">Save Bank</button>
+            <button onClick={saveMvrBank} className="w-full bg-slate-900 text-white p-3 rounded-xl font-bold text-xs uppercase tracking-wider shadow-sm active:scale-95 transition-transform">Save Bank</button>
           </div>
         </div>
       )}
 
       {showDirModal && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[300] flex justify-center items-end sm:items-center">
-          <div className="bg-white w-full max-w-md rounded-t-[2rem] sm:rounded-[2rem] p-6 animate-in slide-in-from-bottom-8 max-h-[85vh] overflow-y-auto">
-            <div className="flex justify-between items-center mb-6">
-              <h3 className="text-lg font-black tracking-tight">User Directory</h3>
+        <div className="fixed inset-0 bg-slate-950/40 backdrop-blur-xs z-[300] flex justify-center items-end sm:items-center p-0 sm:p-4 animate-in fade-in duration-200">
+          <div className="bg-white w-full max-w-md rounded-t-2xl sm:rounded-2xl p-5 shadow-2xl flex flex-col max-h-[85vh] overflow-y-auto">
+            <div className="flex justify-between items-center mb-5">
+              <h3 className="text-base font-bold tracking-tight text-slate-900">User Directory</h3>
               <div className="flex items-center gap-2">
-                <button onClick={() => setIsMerging(!isMerging)} className={`text-[10px] font-black uppercase tracking-widest px-3 py-1.5 rounded-xl transition-colors ${isMerging ? 'bg-orange-100 text-orange-600' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>
+                <button onClick={() => setIsMerging(!isMerging)} className={`text-[9px] font-bold uppercase tracking-wider px-2.5 py-1.5 rounded-xl transition-colors ${isMerging ? 'bg-amber-50 text-amber-600 border border-amber-100' : 'bg-slate-50 text-slate-500 border border-slate-100'}`}>
                   {isMerging ? 'Cancel Merge' : 'Merge Users'}
                 </button>
-                <button onClick={() => setShowDirModal(false)} className="bg-gray-100 p-2 rounded-full text-gray-500 hover:bg-gray-200"><X size={16}/></button>
+                <button onClick={() => setShowDirModal(false)} className="bg-slate-50 p-1.5 rounded-full text-slate-400 hover:bg-slate-100"><X size={15}/></button>
               </div>
             </div>
             
             {isMerging && (
-              <div className="mb-6 bg-orange-50 border border-orange-100 p-4 rounded-2xl">
-                <h4 className="text-[10px] font-black text-orange-600 uppercase tracking-widest mb-3">Merge Duplicate Users</h4>
-                <div className="flex flex-col gap-2 mb-3">
-                  <select value={mergeSourceId} onChange={e => setMergeSourceId(e.target.value)} className="w-full bg-white border border-orange-200 p-2 rounded-xl text-sm font-bold focus:ring-2 focus:ring-orange-400">
+              <div className="mb-5 bg-amber-50/50 border border-amber-100 p-4 rounded-xl">
+                <h4 className="text-[10px] font-bold text-amber-700 uppercase tracking-wider mb-2.5">Merge Duplicate Profile Links</h4>
+                <div className="flex flex-col gap-2 mb-4">
+                  <select value={mergeSourceId} onChange={e => setMergeSourceId(e.target.value)} className="w-full bg-white border border-slate-200 p-2 rounded-xl text-xs font-semibold focus:outline-none">
                     <option value="">Select User to REMOVE...</option>
                     {directory.map(d => <option key={`src-${d.id}`} value={d.id}>{d.name}</option>)}
                   </select>
-                  <div className="text-center text-orange-400 font-bold text-[10px] uppercase tracking-widest">Into</div>
-                  <select value={mergeTargetId} onChange={e => setMergeTargetId(e.target.value)} className="w-full bg-white border border-orange-200 p-2 rounded-xl text-sm font-bold focus:ring-2 focus:ring-orange-400">
+                  <div className="text-center text-amber-500 font-bold text-[9px] uppercase tracking-widest">Merge History Into</div>
+                  <select value={mergeTargetId} onChange={e => setMergeTargetId(e.target.value)} className="w-full bg-white border border-slate-200 p-2 rounded-xl text-xs font-semibold focus:outline-none">
                     <option value="">Select User to KEEP...</option>
                     {directory.map(d => <option key={`tgt-${d.id}`} value={d.id}>{d.name}</option>)}
                   </select>
                 </div>
-                <button onClick={handleMergeUsers} className="w-full bg-orange-500 text-white p-3 rounded-xl font-black text-[10px] uppercase tracking-widest shadow-md active:scale-95 transition-transform">
-                  Confirm & Merge History
+                <button onClick={handleMergeUsers} className="w-full bg-amber-600 text-white p-2.5 rounded-xl font-bold text-[10px] uppercase tracking-wider shadow-sm active:scale-95 transition-transform">
+                  Confirm & Sync Parameters
                 </button>
               </div>
             )}
             
-            <div className="flex gap-2 mb-4">
-              <input placeholder="Name" value={dirName} onChange={e => setDirName(e.target.value)} className="flex-1 bg-gray-50 border border-gray-100 p-3 rounded-xl text-sm font-bold focus:ring-2 focus:ring-[#5fa4ad]" />
-              <input placeholder="Nickname" value={dirNick} onChange={e => setDirNick(e.target.value)} className="w-1/3 bg-gray-50 border border-gray-100 p-3 rounded-xl text-sm font-bold focus:ring-2 focus:ring-[#5fa4ad]" />
-              <button onClick={saveToDirectory} className="bg-[#3a5b5e] text-white p-3 rounded-xl font-black shadow-md hover:bg-[#2d4749]">
-                {editingDirId ? <CheckCircle2 size={20}/> : <Plus size={20}/>}
+            <div className="flex gap-1.5 mb-4">
+              <input placeholder="Full Name" value={dirName} onChange={e => setDirName(e.target.value)} className="flex-grow bg-slate-50 border border-slate-100 p-2.5 rounded-xl text-xs font-semibold focus:outline-none" />
+              <input placeholder="Nickname" value={dirNick} onChange={e => setDirNick(e.target.value)} className="w-1/3 bg-slate-50 border border-slate-100 p-2.5 rounded-xl text-xs font-semibold focus:outline-none" />
+              <button onClick={saveToDirectory} className="bg-slate-900 text-white px-3.5 rounded-xl font-bold hover:bg-slate-800 transition-colors flex items-center justify-center shadow-sm">
+                {editingDirId ? <CheckCircle2 size={16}/> : <Plus size={16}/>}
               </button>
               {editingDirId && (
-                <button onClick={() => { setEditingDirId(null); setDirName(""); setDirNick(""); }} className="bg-gray-200 text-gray-500 p-3 rounded-xl font-black shadow-md hover:bg-gray-300">
-                  <X size={20}/>
+                <button onClick={() => { setEditingDirId(null); setDirName(""); setDirNick(""); }} className="bg-slate-100 text-slate-500 px-3.5 rounded-xl font-bold hover:bg-slate-200 transition-colors">
+                  <X size={16}/>
                 </button>
               )}
             </div>
             
-            <button onClick={extractUsers} className="w-full bg-[#e0f2fe] text-[#0284c7] p-3 rounded-xl font-black text-[10px] uppercase tracking-widest mb-6 active:scale-95 transition-transform border border-blue-100 hover:bg-blue-100">
-              Auto-Extract from Events
+            <button onClick={extractUsers} className="w-full bg-sky-50 text-sky-600 p-2.5 rounded-xl font-bold text-[10px] uppercase tracking-wider mb-5 border border-sky-100 hover:bg-sky-100 transition-colors">
+              Auto-Extract from Unlinked Logs
             </button>
 
-            <div className="space-y-2">
+            <div className="space-y-2 flex-grow overflow-y-auto">
               {directory.map(user => (
-                <div key={user.id} className="flex justify-between items-center p-3 bg-gray-50 rounded-xl border border-gray-100">
+                <div key={user.id} className="flex justify-between items-center p-3 bg-slate-50/70 rounded-xl border border-slate-100">
                   <div>
-                    <p className="font-bold text-[#364d54] text-sm">{user.name}</p>
-                    {user.nickname && <p className="text-[10px] text-[#A0AEC0] font-black uppercase tracking-widest">{user.nickname}</p>}
+                    <p className="font-bold text-slate-800 text-xs">{user.name}</p>
+                    {user.nickname && <p className="text-[9px] text-slate-400 font-bold uppercase tracking-wider mt-0.5">{user.nickname}</p>}
                   </div>
-                  <div className="flex items-center gap-1">
-                    <button onClick={() => { setDirName(user.name); setDirNick(user.nickname); setEditingDirId(user.id); }} className="text-[#5fa4ad] hover:text-blue-500 p-2 rounded-full hover:bg-blue-50 transition-colors"><Edit2 size={16}/></button>
-                    <button onClick={() => deleteFromDirectory(user.id)} className="text-gray-400 hover:text-red-500 p-2 rounded-full hover:bg-red-50 transition-colors"><Trash2 size={16}/></button>
+                  <div className="flex items-center">
+                    <button onClick={() => { setDirName(user.name); setDirNick(user.nickname); setEditingDirId(user.id); }} className="text-slate-400 hover:text-sky-600 p-1.5 rounded-full hover:bg-white transition-colors"><Edit2 size={14}/></button>
+                    <button onClick={() => deleteFromDirectory(user.id)} className="text-slate-400 hover:text-rose-500 p-1.5 rounded-full hover:bg-white transition-colors"><Trash2 size={14}/></button>
                   </div>
                 </div>
               ))}
               {directory.length === 0 && (
-                <div className="text-center py-8 text-[#A0AEC0] font-bold text-sm">
-                  No registered users.
+                <div className="text-center py-6 text-slate-400 font-semibold text-xs">
+                  Directory database index is clear.
                 </div>
               )}
             </div>

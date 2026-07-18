@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+// @ts-expect-error - Ignore style declaration parsing rules for local Tailwind v4 css rules
 import "./globals.css";
 
 const geistSans = Geist({
@@ -15,7 +16,7 @@ const geistMono = Geist_Mono({
 // 1. Metadata (Manifest & SEO)
 export const metadata: Metadata = {
   title: "LExtrack",
-  description: "Personal Finance by LexCorp",
+  description: "Personal Space by LexCorp",
   manifest: "/manifest.json",
   appleWebApp: {
     capable: true,
