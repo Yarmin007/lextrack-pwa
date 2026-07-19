@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
-// @ts-expect-error - Ignore style declaration parsing rules for local Tailwind v4 css rules
+
+// @ts-ignore
 import "./globals.css";
 
 const geistSans = Geist({
@@ -13,28 +14,19 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
-// 1. Metadata (Manifest & SEO)
 export const metadata: Metadata = {
-  title: "LExtrack",
-  description: "Personal Space by LexCorp",
-  manifest: "/manifest.json",
-  appleWebApp: {
-    capable: true,
-    statusBarStyle: "black-translucent",
-    title: "LExtrack",
-  },
+  title: "Lextrack",
+  description: "LexCorp Operations Hub Ledger",
 };
 
-// 2. Viewport (Fixes your themeColor warning)
 export const viewport: Viewport = {
-  themeColor: "#3a5b5e",
+  themeColor: "#F8FAFC",
   width: "device-width",
   initialScale: 1,
   maximumScale: 1,
   userScalable: false,
 };
 
-// 3. The Default Export (This fixes your main error)
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -42,7 +34,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
+      <body className={`${geistSans.variable} ${geistMono.variable} antialiased bg-[#F8FAFC]`}>
         {children}
       </body>
     </html>
