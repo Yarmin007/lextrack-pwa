@@ -5,7 +5,7 @@ import { supabase } from "@/lib/supabase";
 import { 
   Plus, X, Trash2, Wallet, ShoppingCart, Calculator, 
   CheckCircle2, AlertCircle, Send, User, Banknote, LayoutDashboard, 
-  Users, Flame, ClipboardList, Layers, UserPlus, ChevronLeft, Search, UserCheck, Pencil, Receipt, Filter, Building2
+  Users, Flame, ClipboardList, ChevronLeft, Search, UserCheck, Pencil, Filter, Building2, ChevronDown, ChevronUp, FileText, Check, Receipt
 } from "lucide-react";
 import Link from "next/link";
 
@@ -49,6 +49,28 @@ interface ExpenseItem {
   amount: number | string;
 }
 
+interface ItemClaim {
+  id: string;
+  item_id: string;
+  participant_id: string;
+}
+
+interface InvoiceItem {
+  id: string;
+  invoice_id: string;
+  item_name: string;
+  qty: number | string;
+  total_price: number | string;
+  claims: ItemClaim[];
+}
+
+interface Invoice {
+  id: string;
+  activity_id: string;
+  invoice_title: string;
+  items: InvoiceItem[];
+}
+
 interface Activity {
   id: string;
   title: string;
@@ -60,6 +82,7 @@ interface Activity {
   participants: Participant[];
   shopping: ShoppingItem[];
   expenses_breakdown?: ExpenseItem[];
+  invoices?: Invoice[];
 }
 
 interface BankAccount {
@@ -78,6 +101,7 @@ interface BillingLedgerItem {
   hasPaid: boolean;
   initialPartId: string;
   whatsappShared: boolean;
+  claimedItemsText: string[];
 }
 
 export default function ActivitiesPage() {
@@ -89,6 +113,14 @@ export default function ActivitiesPage() {
   const [selectedActId, setSelectedActId] = useState<string | null>(null);
   const [activeTab, setActiveHostTab] = useState<'roster' | 'expenses' | 'finance' | 'shopping'>('roster');
   
+  // Master Directory Visibility Toggle
+  const [showMasterDirectory, setShowMasterDirectory] = useState(false);
+
+  // Manual Check-in Modal State for Activity
+  const [isCheckInModalOpen, setIsCheckInModalOpen] = useState(false);
+  const [checkInSearch, setCheckInSearch] = useState("");
+  const [selectedCheckInMemberIds, setSelectedCheckInMemberIds] = useState<string[]>([]);
+
   const [toast, setToast] = useState<{ message: string, type: 'success' | 'error' } | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -139,13 +171,20 @@ export default function ActivitiesPage() {
     amount: ""
   });
 
-  // Optional Group Creation
-  const [newGroupName, setNewGroupName] = useState("");
-
-  // Expense Tab Form States
+  // Shared Expense Form States
   const [expDesc, setExpDesc] = useState("");
   const [expPaidBy, setExpPaidBy] = useState("");
   const [expAmount, setExpAmount] = useState("");
+
+  // Itemized Invoice Form States
+  const [newInvoiceTitle, setNewInvoiceTitle] = useState("");
+  const [newItemName, setNewItemName] = useState("");
+  const [newItemQty, setNewItemQty] = useState("1");
+  const [newItemPrice, setNewItemPrice] = useState("");
+  const [targetInvoiceIdForItem, setTargetInvoiceIdForItem] = useState("");
+
+  // Optional Group Creation
+  const [newGroupName, setNewGroupName] = useState("");
 
   // Primary Removal Reassignment Modal State
   const [reassignModal, setReassignModal] = useState<{
@@ -188,11 +227,32 @@ export default function ActivitiesPage() {
     
     if (!actErr && actData) {
       const consolidated: Activity[] = await Promise.all(actData.map(async (act: any) => {
-        const [partsRes, shopRes, expRes] = await Promise.all([
+        const [partsRes, shopRes, expRes, invRes] = await Promise.all([
           supabase.from('activity_participants').select('*').eq('activity_id', act.id),
           supabase.from('activity_shopping').select('*').eq('activity_id', act.id),
-          supabase.from('activity_expenses').select('*').eq('activity_id', act.id)
+          supabase.from('activity_expenses').select('*').eq('activity_id', act.id),
+          supabase.from('activity_invoices').select('*').eq('activity_id', act.id)
         ]);
+
+        const rawInvoices = invRes.data || [];
+        const invoicesWithItems = await Promise.all(rawInvoices.map(async (inv: any) => {
+          const itemsRes = await supabase.from('activity_invoice_items').select('*').eq('invoice_id', inv.id);
+          const rawItems = itemsRes.data || [];
+
+          const itemsWithClaims = await Promise.all(rawItems.map(async (itm: any) => {
+            const claimsRes = await supabase.from('activity_item_claims').select('*').eq('item_id', itm.id);
+            return {
+              ...itm,
+              claims: claimsRes.data || []
+            };
+          }));
+
+          return {
+            ...inv,
+            items: itemsWithClaims
+          };
+        }));
+
         return {
           ...act,
           groups_list: act.groups_list || [],
@@ -200,7 +260,8 @@ export default function ActivitiesPage() {
           manual_exclusions: act.manual_exclusions || [],
           participants: partsRes.data || [],
           shopping: shopRes.data || [],
-          expenses_breakdown: expRes.data || []
+          expenses_breakdown: expRes.data || [],
+          invoices: invoicesWithItems
         };
       }));
       setActivities(consolidated);
@@ -216,7 +277,7 @@ export default function ActivitiesPage() {
 
   const currentActivity = activities.find((a: Activity) => a.id === selectedActId);
 
-  // --- Breakdown metrics ---
+  // --- Calculations ---
   const calculateBreakdown = (activity?: Activity) => {
     let adults = 0;
     let kids = 0;
@@ -248,22 +309,28 @@ export default function ActivitiesPage() {
     }).length;
   };
 
-  const calculateSharePerHead = (activity?: Activity) => {
+  const calculateGrandTotalExpenses = (activity?: Activity) => {
     if (!activity) return 0;
-    const eligibleCount = calculateEligiblePayingHeadCount(activity);
-    if (eligibleCount === 0) return 0;
-    const totalExp = typeof activity.total_expenses === 'number' ? activity.total_expenses : parseFloat(activity.total_expenses) || 0;
-    return totalExp / eligibleCount;
+    const sharedTotal = (activity.expenses_breakdown || []).reduce((sum, e) => sum + (parseFloat(e.amount as string) || 0), 0);
+    
+    let invoiceTotal = 0;
+    (activity.invoices || []).forEach(inv => {
+      inv.items.forEach(itm => {
+        invoiceTotal += (parseFloat(itm.total_price as string) || 0);
+      });
+    });
+
+    return sharedTotal + invoiceTotal;
   };
 
   const getBillingLedgerGrouped = (activity?: Activity): BillingLedgerItem[] => {
     if (!activity || !activity.participants) return [];
-    
-    const sharePerHead = calculateSharePerHead(activity);
+
     const exclusions = activity.manual_exclusions || [];
     const mode = activity.split_mode || 'all';
     const billsMap: Record<string, BillingLedgerItem> = {};
 
+    // 1. Initialize Head Ledger Cards
     activity.participants.forEach((p: Participant) => {
       const profile = masterMembers.find((m: MasterMember) => m.id === p.master_member_id);
       const profileName = profile ? profile.full_name : p.primary_name;
@@ -287,7 +354,8 @@ export default function ActivitiesPage() {
           totalDue: 0,
           hasPaid: p.has_paid,
           initialPartId: p.id,
-          whatsappShared: p.whatsapp_shared || false
+          whatsappShared: p.whatsapp_shared || false,
+          claimedItemsText: []
         };
       }
 
@@ -296,14 +364,58 @@ export default function ActivitiesPage() {
       const isBillable = !isExcludedManually && !isKidExcludedByMode;
 
       billsMap[headId].attendees.push(profileName + (isBillable ? "" : " (Excluded)"));
-      if (isBillable) {
-        billsMap[headId].totalDue += sharePerHead;
-      }
-
       if (!p.has_paid) billsMap[headId].hasPaid = false; 
     });
 
+    // 2. Add General Shared Expenses (Equal Split)
+    const eligibleParticipants = activity.participants.filter((p: Participant) => {
+      if (exclusions.includes(p.id)) return false;
+      const profile = masterMembers.find((m: MasterMember) => m.id === p.master_member_id);
+      if (mode === 'adults_only' && profile?.member_type === 'kid') return false;
+      return true;
+    });
+
+    const generalSharedTotal = (activity.expenses_breakdown || []).reduce((sum, e) => sum + (parseFloat(e.amount as string) || 0), 0);
+    if (eligibleParticipants.length > 0 && generalSharedTotal > 0) {
+      const perHeadGeneralShare = generalSharedTotal / eligibleParticipants.length;
+      eligibleParticipants.forEach(p => {
+        const headId = p.head_id || p.master_member_id || p.id;
+        if (billsMap[headId]) {
+          billsMap[headId].totalDue += perHeadGeneralShare;
+        }
+      });
+    }
+
+    // 3. Add Itemized Invoice Claims
+    (activity.invoices || []).forEach(inv => {
+      inv.items.forEach(item => {
+        const itemPrice = parseFloat(item.total_price as string) || 0;
+        const claims = item.claims || [];
+        if (claims.length > 0) {
+          const sharePerClaimant = itemPrice / claims.length;
+          claims.forEach(c => {
+            const claimantPart = activity.participants.find(p => p.id === c.participant_id);
+            if (claimantPart) {
+              const headId = claimantPart.head_id || claimantPart.master_member_id || claimantPart.id;
+              if (billsMap[headId]) {
+                billsMap[headId].totalDue += sharePerClaimant;
+                billsMap[headId].claimedItemsText.push(`${item.item_name} (${claimantPart.primary_name}): MVR ${sharePerClaimant.toFixed(2)}`);
+              }
+            }
+          });
+        }
+      });
+    });
+
     return Object.values(billsMap);
+  };
+
+  const calculateSharePerHead = (activity?: Activity) => {
+    if (!activity) return 0;
+    const eligibleCount = calculateEligiblePayingHeadCount(activity);
+    if (eligibleCount === 0) return 0;
+    const generalSharedTotal = (activity.expenses_breakdown || []).reduce((sum, e) => sum + (parseFloat(e.amount as string) || 0), 0);
+    return generalSharedTotal / eligibleCount;
   };
 
   const calculateReceivedSummary = (activity?: Activity) => {
@@ -354,7 +466,7 @@ export default function ActivitiesPage() {
     }
   };
 
-  // --- Handlers ---
+  // --- Activity & Split Handlers ---
   const handleUpdateSplitMode = async (actId: string, newMode: 'all' | 'adults_only') => {
     setActivities(prev => prev.map(a => a.id === actId ? { ...a, split_mode: newMode } : a));
     await supabase.from('activities').update({ split_mode: newMode }).eq('id', actId);
@@ -386,9 +498,7 @@ export default function ActivitiesPage() {
       setActTitle("");
       fetchActivitiesData();
     } else {
-      console.error("Supabase Error (Create Activity):", error);
-      const errorMessage = error?.message || error?.details || error?.hint || (error && Object.keys(error).length > 0 ? JSON.stringify(error) : "Database schema mismatch or RLS restriction");
-      showToast(errorMessage, "error");
+      showToast(error?.message || "Error creating activity session", "error");
     }
   };
 
@@ -400,6 +510,7 @@ export default function ActivitiesPage() {
       await supabase.from('activity_participants').delete().eq('activity_id', actId);
       await supabase.from('activity_shopping').delete().eq('activity_id', actId);
       await supabase.from('activity_expenses').delete().eq('activity_id', actId);
+      await supabase.from('activity_invoices').delete().eq('activity_id', actId);
 
       const { error } = await supabase.from('activities').delete().eq('id', actId);
 
@@ -417,7 +528,7 @@ export default function ActivitiesPage() {
     }
   };
 
-  // --- Expense Handlers ---
+  // Shared Expense Handlers (Shared equally among all)
   const handleAddExpenseItem = async (actId: string) => {
     if (!expDesc.trim()) return showToast("Description is required", "error");
     if (!expPaidBy) return showToast("Select who paid for this expense", "error");
@@ -432,19 +543,14 @@ export default function ActivitiesPage() {
     };
 
     const { error } = await supabase.from('activity_expenses').insert(payload);
-    if (error) {
-      showToast(`DB Error: ${error.message}`, "error");
-    } else {
+    if (!error) {
       setExpDesc("");
       setExpPaidBy("");
       setExpAmount("");
-      
-      const currentExpenses = currentActivity?.expenses_breakdown || [];
-      const newTotal = currentExpenses.reduce((sum, item) => sum + (parseFloat(item.amount as string) || 0), 0) + parsedAmount;
-      await supabase.from('activities').update({ total_expenses: newTotal }).eq('id', actId);
-      
-      showToast("Expense logged!");
+      showToast("Shared expense logged!");
       fetchActivitiesData();
+    } else {
+      showToast(`DB Error: ${error.message}`, "error");
     }
   };
 
@@ -466,36 +572,100 @@ export default function ActivitiesPage() {
     if (error) {
       showToast(`Error updating expense: ${error.message}`, "error");
     } else {
-      const remainingExpenses = (currentActivity.expenses_breakdown || []).map(item => 
-        item.id === editExpenseModal.item?.id ? { ...item, ...payload } : item
-      );
-      const newTotal = remainingExpenses.reduce((sum, item) => sum + (parseFloat(item.amount as string) || 0), 0);
-      await supabase.from('activities').update({ total_expenses: newTotal }).eq('id', currentActivity.id);
-
       setEditExpenseModal({ isOpen: false, item: null, desc: "", paidBy: "", amount: "" });
       showToast("Expense updated!");
       fetchActivitiesData();
     }
   };
 
-  const handleRemoveExpenseItem = async (actId: string, itemId: string) => {
+  const handleRemoveExpenseItem = async (itemId: string) => {
     const { error } = await supabase.from('activity_expenses').delete().eq('id', itemId);
     if (!error) {
-      const remainingExpenses = (currentActivity?.expenses_breakdown || []).filter(item => item.id !== itemId);
-      const newTotal = remainingExpenses.reduce((sum, item) => sum + (parseFloat(item.amount as string) || 0), 0);
-      await supabase.from('activities').update({ total_expenses: newTotal }).eq('id', actId);
-      
       fetchActivitiesData();
-      showToast("Expense item removed");
+      showToast("Shared expense item removed");
     }
   };
 
-  // Mobile-Optimized WhatsApp Sharing
+  // --- Itemized Invoice Handlers ---
+  const handleCreateInvoice = async (actId: string) => {
+    if (!newInvoiceTitle.trim()) return showToast("Invoice title required", "error");
+
+    const { error } = await supabase.from('activity_invoices').insert({
+      activity_id: actId,
+      invoice_title: newInvoiceTitle.trim()
+    });
+
+    if (!error) {
+      setNewInvoiceTitle("");
+      showToast("New Invoice Added!");
+      fetchActivitiesData();
+    } else {
+      showToast(`Error adding invoice: ${error.message}`, "error");
+    }
+  };
+
+  const handleRemoveInvoice = async (invId: string) => {
+    if (!confirm("Delete this invoice and all its items?")) return;
+    const { error } = await supabase.from('activity_invoices').delete().eq('id', invId);
+    if (!error) {
+      showToast("Invoice deleted");
+      fetchActivitiesData();
+    }
+  };
+
+  const handleAddItemToInvoice = async (invId: string) => {
+    if (!newItemName.trim()) return showToast("Item description required", "error");
+    const parsedQty = parseFloat(newItemQty) || 1;
+    const parsedPrice = parseFloat(newItemPrice) || 0;
+    if (parsedPrice <= 0) return showToast("Enter valid total price", "error");
+
+    const { error } = await supabase.from('activity_invoice_items').insert({
+      invoice_id: invId,
+      item_name: newItemName.trim(),
+      qty: parsedQty,
+      total_price: parsedPrice
+    });
+
+    if (!error) {
+      setNewItemName("");
+      setNewItemQty("1");
+      setNewItemPrice("");
+      setTargetInvoiceIdForItem("");
+      showToast("Item added to invoice!");
+      fetchActivitiesData();
+    } else {
+      showToast(`Error adding item: ${error.message}`, "error");
+    }
+  };
+
+  const handleRemoveInvoiceItem = async (itemId: string) => {
+    const { error } = await supabase.from('activity_invoice_items').delete().eq('id', itemId);
+    if (!error) {
+      fetchActivitiesData();
+      showToast("Item removed from invoice");
+    }
+  };
+
+  const handleToggleItemClaim = async (itemId: string, participantId: string, currentClaims: ItemClaim[]) => {
+    const existingClaim = currentClaims.find(c => c.participant_id === participantId);
+
+    if (existingClaim) {
+      await supabase.from('activity_item_claims').delete().eq('id', existingClaim.id);
+    } else {
+      await supabase.from('activity_item_claims').insert({
+        item_id: itemId,
+        participant_id: participantId
+      });
+    }
+
+    fetchActivitiesData();
+  };
+
+  // WhatsApp Single Person Invoice Broadcast
   const openWhatsAppLink = (msg: string) => {
     const encoded = encodeURIComponent(msg);
     const isMobile = typeof window !== 'undefined' && /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
     const url = `https://api.whatsapp.com/send?text=${encoded}`;
-    
     if (isMobile) {
       window.location.href = url;
     } else {
@@ -503,32 +673,10 @@ export default function ActivitiesPage() {
     }
   };
 
-  // WhatsApp Group Summary
-  const handleShareWhatsApp = (act: Activity) => {
-    const sharePerHead = calculateSharePerHead(act);
-    const ledger = getBillingLedgerGrouped(act);
-    const totalExp = typeof act.total_expenses === 'number' ? act.total_expenses : parseFloat(act.total_expenses) || 0;
-    
-    let msg = `*🏡 INVOICE SUMMARY: ${act.title.toUpperCase()}*\n📅 Date: ${act.activity_date}\n💰 Total Expense: MVR ${totalExp.toFixed(2)}\n📊 Per Person: MVR ${sharePerHead.toFixed(2)}\n\n*BILLING DETAILS:*\n`;
-
-    ledger.forEach((item: BillingLedgerItem) => {
-      msg += `• *Primary Head: ${item.headName}*\n`;
-      msg += `  ↳ For: ${item.attendees.join(', ')}\n`;
-      msg += `  💳 Amount: *MVR ${item.totalDue.toFixed(0)}* [${item.hasPaid ? 'PAID ✅' : 'PENDING ⏳'}]\n\n`;
-    });
-
-    openWhatsAppLink(msg);
-  };
-
-  // WhatsApp Personal Structured Invoice Broadcast
   const handleSharePersonalWhatsApp = async (act: Activity, ledgerItem: BillingLedgerItem) => {
     const activeBank = bankAccounts.find(b => b.id === selectedBankIdForInvoice) || bankAccounts[0];
-
     const formattedDate = act.activity_date ? act.activity_date.split('-').reverse().join('/') : new Date().toLocaleDateString('en-GB');
-    const totalExp = typeof act.total_expenses === 'number' ? act.total_expenses : parseFloat(act.total_expenses) || 0;
-    const sharePerHead = calculateSharePerHead(act);
-    const eligibleCount = calculateEligiblePayingHeadCount(act);
-    const familyPaxCount = ledgerItem.attendees.filter(a => !a.includes('(Excluded)')).length;
+    const grandTotal = calculateGrandTotalExpenses(act);
 
     let msg = `INVOICE\n`;
     msg += `Bill To: ${ledgerItem.headName.toUpperCase()}\n`;
@@ -536,19 +684,26 @@ export default function ActivitiesPage() {
     msg += `(${formattedDate})\n`;
     msg += `•⁠ ⁠${act.title.toUpperCase()}\n`;
 
+    // 1. Shared General Expenses
     if (act.expenses_breakdown && act.expenses_breakdown.length > 0) {
+      const eligibleCount = calculateEligiblePayingHeadCount(act);
       act.expenses_breakdown.forEach((exp: ExpenseItem) => {
-        msg += `    └ ${exp.description.toUpperCase()}: MVR ${parseFloat(exp.amount as string).toFixed(2)}\n`;
+        const share = (parseFloat(exp.amount as string) || 0) / (eligibleCount || 1);
+        msg += `    └ ${exp.description.toUpperCase()} (Shared): MVR ${share.toFixed(2)}\n`;
+      });
+    }
+
+    // 2. Itemized Invoice Claims
+    if (ledgerItem.claimedItemsText.length > 0) {
+      ledgerItem.claimedItemsText.forEach(line => {
+        msg += `    └ ${line.toUpperCase()}\n`;
       });
     }
 
     msg += `    -----------------------------------\n`;
-    msg += `    Total Event Cost: MVR ${totalExp.toFixed(2)}\n`;
-    msg += `    Split Among: ${eligibleCount} Paying Pax\n`;
-    msg += `    Cost Per Head: MVR ${sharePerHead.toFixed(2)}\n`;
-    msg += `    -----------------------------------\n`;
+    msg += `    Total Event Cost: MVR ${grandTotal.toFixed(2)}\n`;
     msg += `    Included: ${ledgerItem.attendees.join(', ')}\n`;
-    msg += `    Subtotal (${familyPaxCount} pax × MVR ${sharePerHead.toFixed(2)}): ${ledgerItem.totalDue.toFixed(2)} MVR\n\n`;
+    msg += `    Subtotal: ${ledgerItem.totalDue.toFixed(2)} MVR\n\n`;
     msg += `TOTAL DUE: ${ledgerItem.totalDue.toFixed(2)} MVR\n\n`;
 
     if (activeBank) {
@@ -576,16 +731,13 @@ export default function ActivitiesPage() {
     };
 
     const { error } = await supabase.from('activity_master_members').insert(payload);
-    
     if (!error) {
       showToast("Profile added to Master List!");
       setNewProfileName("");
       setNewProfileDependentId("");
       fetchMasterListProfiles();
     } else {
-      console.error("Supabase Error (Create Member):", error);
-      const errorMessage = error?.message || error?.details || JSON.stringify(error);
-      showToast(`DB Error: ${errorMessage}`, "error");
+      showToast(`DB Error: ${error.message}`, "error");
     }
   };
 
@@ -593,9 +745,7 @@ export default function ActivitiesPage() {
     if (!confirm(`Permanently delete "${member.full_name}" from Master Directory?`)) return;
 
     const { error } = await supabase.from('activity_master_members').delete().eq('id', member.id);
-    if (error) {
-      showToast(`Error deleting profile: ${error.message}`, "error");
-    } else {
+    if (!error) {
       showToast("Profile deleted from directory");
       fetchMasterListProfiles();
     }
@@ -625,9 +775,7 @@ export default function ActivitiesPage() {
       .update(payload)
       .eq('id', editMemberModal.member.id);
 
-    if (error) {
-      showToast(`Error updating profile: ${error.message}`, "error");
-    } else {
+    if (!error) {
       showToast("Profile updated!");
       setEditMemberModal({ isOpen: false, member: null, editName: "", editType: "adult", editDependentId: "" });
       fetchMasterListProfiles();
@@ -640,28 +788,35 @@ export default function ActivitiesPage() {
     await supabase.from('activities').update({ total_expenses: parseFloat(val) || 0 }).eq('id', actId);
   };
 
-  const handleAddMemberToActivity = async (actId: string, masterMemberObj: MasterMember) => {
-    const isAlreadyAdded = currentActivity?.participants.some((p: Participant) => p.master_member_id === masterMemberObj.id);
-    if (isAlreadyAdded) return showToast("Member already in this activity", "error");
+  const handleAddSelectedMembersToActivity = async (actId: string) => {
+    if (selectedCheckInMemberIds.length === 0) return showToast("Select members to add", "error");
 
-    const newAttendee = { 
-      activity_id: actId, 
-      primary_name: masterMemberObj.full_name, 
-      master_member_id: masterMemberObj.id,
-      head_id: masterMemberObj.dependent_id || masterMemberObj.id,
-      has_paid: false, 
+    const unaddedSelected = masterMembers.filter(m => 
+      selectedCheckInMemberIds.includes(m.id) &&
+      !currentActivity?.participants.some(p => p.master_member_id === m.id)
+    );
+
+    if (unaddedSelected.length === 0) {
+      setIsCheckInModalOpen(false);
+      return showToast("Selected members are already in this activity", "error");
+    }
+
+    const payload = unaddedSelected.map((m: MasterMember) => ({
+      activity_id: actId,
+      primary_name: m.full_name,
+      master_member_id: m.id,
+      head_id: m.dependent_id || m.id,
+      has_paid: false,
       assigned_group: "",
       whatsapp_shared: false
-    };
+    }));
 
-    const { error } = await supabase.from('activity_participants').insert(newAttendee);
-    if (error) {
-      console.error("Supabase Error (Add Member):", error);
-      const errorMessage = error?.message || error?.details || JSON.stringify(error);
-      showToast(`DB Error: ${errorMessage}`, "error");
-    } else {
+    const { error } = await supabase.from('activity_participants').insert(payload);
+    if (!error) {
       fetchActivitiesData();
-      showToast(`${masterMemberObj.full_name} checked in`);
+      setIsCheckInModalOpen(false);
+      setSelectedCheckInMemberIds([]);
+      showToast(`Added ${unaddedSelected.length} member(s) to activity!`);
     }
   };
 
@@ -687,10 +842,7 @@ export default function ActivitiesPage() {
     }));
 
     const { error } = await supabase.from('activity_participants').insert(payload);
-    if (error) {
-      console.error("Supabase Error (Import All):", error);
-      showToast(`DB Error: ${error.message}`, "error");
-    } else {
+    if (!error) {
       fetchActivitiesData();
       showToast(`Imported ${unaddedMembers.length} members to activity!`);
     }
@@ -724,16 +876,7 @@ export default function ActivitiesPage() {
     if (!selectedNewHeadId || !reassignModal.removingParticipant || !currentActivity) return;
 
     const dependentIds = reassignModal.dependentsToReassign.map(d => d.id);
-    const { error: updateErr } = await supabase
-      .from('activity_participants')
-      .update({ head_id: selectedNewHeadId })
-      .in('id', dependentIds);
-
-    if (updateErr) {
-      showToast("Failed to reassign dependents", "error");
-      return;
-    }
-
+    await supabase.from('activity_participants').update({ head_id: selectedNewHeadId }).in('id', dependentIds);
     await handleRemoveParticipant(reassignModal.removingParticipant.id);
 
     setReassignModal({ isOpen: false, removingParticipant: null, dependentsToReassign: [] });
@@ -826,6 +969,86 @@ export default function ActivitiesPage() {
         </div>
       )}
 
+      {/* SELECTIVE MASTER MEMBER CHECK-IN MODAL */}
+      {isCheckInModalOpen && currentActivity && (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs z-[1000] flex items-center justify-center p-3 sm:p-4">
+          <div className="bg-white rounded-2xl border border-slate-200 p-4 sm:p-6 max-w-lg w-full shadow-2xl space-y-4 max-h-[85vh] flex flex-col">
+            <div className="flex justify-between items-center border-b border-slate-100 pb-3">
+              <h3 className="text-xs sm:text-sm font-bold text-slate-900 flex items-center gap-2">
+                <UserCheck size={16} className="text-slate-600"/> Add Members from Master Directory
+              </h3>
+              <button onClick={() => setIsCheckInModalOpen(false)} className="text-slate-400 hover:text-slate-800 p-1"><X size={18}/></button>
+            </div>
+
+            <div className="relative">
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/>
+              <input 
+                type="text" 
+                placeholder="Search master profiles..." 
+                value={checkInSearch}
+                onChange={(e) => setCheckInSearch(e.target.value)}
+                className="w-full bg-slate-50 border border-slate-200 pl-9 pr-3 py-2 rounded-xl text-xs font-semibold focus:outline-none"
+              />
+            </div>
+
+            <div className="flex-1 overflow-y-auto space-y-2 pr-1 min-h-[200px]">
+              {masterMembers
+                .filter(m => !currentActivity.participants.some(p => p.master_member_id === m.id))
+                .filter(m => m.full_name.toLowerCase().includes(checkInSearch.toLowerCase()))
+                .map((m: MasterMember) => {
+                  const isChecked = selectedCheckInMemberIds.includes(m.id);
+                  const depHead = m.dependent_id ? masterMembers.find(h => h.id === m.dependent_id) : null;
+
+                  return (
+                    <label 
+                      key={m.id} 
+                      className={`flex items-center justify-between p-3 rounded-xl border cursor-pointer transition-colors ${isChecked ? 'bg-slate-900 text-white border-slate-900' : 'bg-slate-50 border-slate-100 text-slate-800 hover:bg-slate-100'}`}
+                    >
+                      <div className="flex items-center gap-2 truncate pr-2">
+                        <input 
+                          type="checkbox" 
+                          checked={isChecked}
+                          onChange={() => {
+                            setSelectedCheckInMemberIds(prev => 
+                              prev.includes(m.id) ? prev.filter(id => id !== m.id) : [...prev, m.id]
+                            );
+                          }}
+                          className="rounded border-slate-300 text-slate-900 focus:ring-0"
+                        />
+                        <span className="text-xs font-bold truncate">{m.full_name}</span>
+                        {m.member_type === 'kid' && (
+                          <span className={`text-[8px] font-extrabold uppercase px-1.5 py-0.2 rounded ${isChecked ? 'bg-amber-400 text-slate-900' : 'bg-[#FFF3CD] text-[#B47000]'}`}>
+                            KID
+                          </span>
+                        )}
+                      </div>
+
+                      <span className={`text-[9px] font-semibold ${isChecked ? 'text-slate-300' : 'text-slate-400'}`}>
+                        {depHead ? `Under: ${depHead.full_name}` : 'Primary'}
+                      </span>
+                    </label>
+                  );
+                })}
+            </div>
+
+            <div className="pt-2 border-t border-slate-100 flex gap-2">
+              <button 
+                onClick={() => setIsCheckInModalOpen(false)}
+                className="flex-1 py-2.5 bg-slate-100 text-slate-600 font-bold text-xs rounded-xl hover:bg-slate-200 transition-colors"
+              >
+                Cancel
+              </button>
+              <button 
+                onClick={() => handleAddSelectedMembersToActivity(currentActivity.id)}
+                className="flex-1 py-2.5 bg-slate-900 text-white font-bold text-xs rounded-xl hover:bg-slate-800 transition-colors"
+              >
+                Add Selected ({selectedCheckInMemberIds.length})
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* SAVED BANK ACCOUNTS MANAGMENT MODAL */}
       {isBankModalOpen && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs z-[1000] flex items-center justify-center p-3 sm:p-4">
@@ -837,7 +1060,6 @@ export default function ActivitiesPage() {
               <button onClick={() => setIsBankModalOpen(false)} className="text-slate-400 hover:text-slate-800 p-1"><X size={18}/></button>
             </div>
 
-            {/* Add Bank Account Form */}
             <div className="bg-slate-50 p-3 sm:p-4 rounded-xl border border-slate-100 space-y-3">
               <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Add New Account</span>
               <div className="grid grid-cols-1 sm:grid-cols-12 gap-2">
@@ -872,7 +1094,6 @@ export default function ActivitiesPage() {
               </button>
             </div>
 
-            {/* Existing Accounts List */}
             <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
               <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Existing Saved Accounts</span>
               {bankAccounts.length === 0 ? (
@@ -897,8 +1118,8 @@ export default function ActivitiesPage() {
       {editExpenseModal.isOpen && editExpenseModal.item && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs z-[1000] flex items-center justify-center p-3 sm:p-4">
           <div className="bg-white rounded-2xl border border-slate-200 p-5 max-w-md w-full shadow-2xl space-y-4">
-            <h3 className="text-xs sm:text-sm font-bold text-slate-900 flex items-center gap-2">
-              <Pencil size={16} className="text-slate-600"/> Edit Expense Entry
+            <h3 className="text-xs sm:text-sm font-bold text-slate-900 flex items-center gap-2 border-b border-slate-100 pb-2">
+              <Pencil size={16} className="text-slate-600"/> Edit Shared Expense
             </h3>
 
             <div className="space-y-3">
@@ -936,7 +1157,7 @@ export default function ActivitiesPage() {
               </div>
             </div>
 
-            <div className="flex gap-2 pt-2">
+            <div className="flex gap-2 pt-2 border-t border-slate-100">
               <button 
                 onClick={() => setEditExpenseModal({ isOpen: false, item: null, desc: "", paidBy: "", amount: "" })} 
                 className="flex-1 py-2.5 bg-slate-100 text-slate-600 font-bold text-xs rounded-xl hover:bg-slate-200 transition-colors"
@@ -1102,7 +1323,7 @@ export default function ActivitiesPage() {
             <div className="space-y-6 sm:space-y-8 animate-in fade-in duration-300">
               <header>
                 <h2 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900">Activity Hub</h2>
-                <p className="text-xs font-semibold text-slate-500 mt-1">Manage events, track expenses, and configure your master directory.</p>
+                <p className="text-xs font-semibold text-slate-500 mt-1">Manage events, track expenses, and view collection stats.</p>
               </header>
 
               {/* CREATE ACTIVITY ACTION SECTION */}
@@ -1118,7 +1339,7 @@ export default function ActivitiesPage() {
                 <button onClick={handleCreateActivity} className="w-full sm:w-auto h-10 px-5 bg-slate-900 hover:bg-slate-800 text-white font-semibold text-xs uppercase tracking-wider rounded-xl shadow-xs flex items-center justify-center gap-1 shrink-0 transition-transform active:scale-95"><Plus size={14}/> Create Activity</button>
               </div>
 
-              {/* ACTIVITIES GRID */}
+              {/* ACTIVITIES GRID WITH GRAPHICAL STATS */}
               <div>
                 <h3 className="text-sm font-bold text-slate-900 mb-3 flex items-center gap-2"><Flame size={16} className="text-slate-400"/> All Created Activities</h3>
                 {activities.length === 0 ? (
@@ -1129,6 +1350,11 @@ export default function ActivitiesPage() {
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5 sm:gap-4">
                     {activities.map((a: Activity) => {
                       const breakdown = calculateBreakdown(a);
+                      const stats = calculateReceivedSummary(a);
+                      const totalBillable = stats.totalCollected + stats.totalOutstanding;
+                      const collectedPct = totalBillable > 0 ? Math.min(100, Math.round((stats.totalCollected / totalBillable) * 100)) : 0;
+                      const grandExpense = calculateGrandTotalExpenses(a);
+
                       return (
                         <div 
                           key={a.id} 
@@ -1148,10 +1374,23 @@ export default function ActivitiesPage() {
                             <Trash2 size={14}/>
                           </button>
                           
+                          <div className="bg-slate-50/80 border border-slate-100 p-2.5 rounded-xl mb-3 space-y-1.5">
+                            <div className="flex justify-between items-center text-[10px] font-bold">
+                              <span className="text-slate-400 uppercase tracking-wider">Collected</span>
+                              <span className="text-slate-800">{collectedPct}% <span className="text-slate-400 font-normal">({stats.totalCollected.toFixed(0)} / {totalBillable.toFixed(0)} MVR)</span></span>
+                            </div>
+                            <div className="w-full bg-slate-200 h-1.5 rounded-full overflow-hidden">
+                              <div 
+                                className="bg-emerald-500 h-full transition-all duration-300"
+                                style={{ width: `${collectedPct}%` }}
+                              />
+                            </div>
+                          </div>
+
                           <div className="mt-auto grid grid-cols-2 gap-2 border-t border-slate-100 pt-3">
                             <div>
                               <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Total Expense</p>
-                              <p className="text-xs font-black text-slate-800">MVR {typeof a.total_expenses === 'number' ? a.total_expenses.toFixed(0) : parseFloat(a.total_expenses).toFixed(0)}</p>
+                              <p className="text-xs font-black text-slate-800">MVR {grandExpense.toFixed(0)}</p>
                             </div>
                             <div>
                               <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Attendees</p>
@@ -1167,146 +1406,161 @@ export default function ActivitiesPage() {
 
               <div className="my-6 border-t border-slate-200/60 w-full" />
 
-              {/* MASTER DIRECTORY */}
-              <div>
-                <h3 className="text-sm font-bold text-slate-900 mb-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              {/* COLLAPSIBLE MASTER DIRECTORY SECTION */}
+              <div className="bg-white rounded-2xl border border-slate-200/60 shadow-[0_2px_12px_rgba(0,0,0,0.02)] overflow-hidden">
+                <div 
+                  onClick={() => setShowMasterDirectory(!showMasterDirectory)}
+                  className="p-4 sm:p-5 flex items-center justify-between cursor-pointer hover:bg-slate-50/50 transition-colors select-none"
+                >
                   <div className="flex items-center gap-2">
-                    <Users size={16} className="text-slate-400"/> Master Members Directory
-                  </div>
-                  <div className="text-[10px] font-bold text-slate-500 bg-white px-3 py-1.5 rounded-lg border border-slate-200/60 shadow-[0_2px_12px_rgba(0,0,0,0.02)] w-fit">
-                    {totalMasterAdults} Adults | {totalMasterKids} Kids | {totalMasterPrimary} Primary | {totalMasterDependent} Dependents
-                  </div>
-                </h3>
-                
-                <div className="bg-white rounded-2xl border border-slate-200/60 p-4 sm:p-5 shadow-[0_2px_12px_rgba(0,0,0,0.02)]">
-                  <div className="mb-6 space-y-3">
-                    <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-wider pl-1">Add Profile to Master Record</h4>
-                    <div className="flex flex-col sm:flex-row flex-wrap gap-2.5">
-                      <input 
-                        type="text" 
-                        placeholder="Full Profile Name" 
-                        value={newProfileName} 
-                        onChange={(e) => setNewProfileName(e.target.value)} 
-                        className="flex-1 min-w-[200px] bg-white border border-slate-200 px-3.5 py-2.5 rounded-xl text-xs sm:text-sm font-semibold focus:outline-none text-slate-800"
-                      />
-                      
-                      <select 
-                        value={newProfileType} 
-                        onChange={(e) => setNewProfileType(e.target.value as 'adult' | 'kid')} 
-                        className="w-full sm:w-28 bg-white border border-slate-200 px-3 py-2.5 rounded-xl text-xs sm:text-sm font-semibold focus:outline-none text-slate-700"
-                      >
-                        <option value="adult">Adult</option>
-                        <option value="kid">Kid</option>
-                      </select>
-
-                      <select 
-                        value={newProfileDependentId} 
-                        onChange={(e) => setNewProfileDependentId(e.target.value)} 
-                        className="flex-1 min-w-[200px] bg-white border border-slate-200 px-3 py-2.5 rounded-xl text-xs sm:text-sm font-semibold focus:outline-none text-slate-600"
-                      >
-                        <option value="">Primary / Independent (No Dependency)</option>
-                        {masterMembers.filter((m: MasterMember) => m.member_type === 'adult' && !m.dependent_id).map((m: MasterMember) => (
-                          <option key={m.id} value={m.id}>Under: {m.full_name}</option>
-                        ))}
-                      </select>
-                      
-                      <button 
-                        onClick={handleCreateMasterMember} 
-                        className="w-full sm:w-auto px-5 py-2.5 bg-[#0F172A] text-white font-bold text-[11px] uppercase tracking-widest rounded-xl shadow-xs transition-transform active:scale-95 shrink-0"
-                      >
-                        Save Profile
-                      </button>
+                    <Users size={18} className="text-slate-500"/>
+                    <div>
+                      <h3 className="text-sm font-bold text-slate-900">Master Members Directory</h3>
+                      <p className="text-[10px] font-semibold text-slate-400 mt-0.5">Manage permanent profiles and dependency links across events.</p>
                     </div>
                   </div>
 
-                  <div className="mb-4 relative">
-                    <Search size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
-                    <input 
-                      type="text" 
-                      placeholder="Search directory by name..." 
-                      value={masterSearchQuery}
-                      onChange={(e) => setMasterSearchQuery(e.target.value)}
-                      className="w-full sm:w-72 bg-white border border-slate-200 pl-9 pr-4 py-2 rounded-xl text-xs font-semibold focus:outline-none text-slate-800 shadow-xs"
-                    />
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                    {filteredPrimaryMembers.map((primary: MasterMember) => {
-                      const dependents = masterMembers.filter(m => m.dependent_id === primary.id);
-                      
-                      return (
-                        <div key={primary.id} className="bg-white border border-slate-200 rounded-2xl p-3.5 flex flex-col shadow-xs gap-2.5 relative group">
-                          <div className="flex items-center justify-between border-b border-slate-100 pb-2.5 pr-12">
-                            <div className="flex items-center gap-1.5 truncate">
-                              <span className="text-xs sm:text-sm font-bold text-slate-900 uppercase tracking-tight truncate">{primary.full_name}</span>
-                              {primary.member_type === 'kid' && (
-                                <span className="text-[8px] font-extrabold uppercase px-1.5 py-0.5 rounded-md tracking-wider bg-[#FFF3CD] text-[#B47000] shrink-0">
-                                  KID
-                                </span>
-                              )}
-                            </div>
-                            <span className="text-[9px] text-slate-400 font-semibold tracking-wide shrink-0">
-                              Primary
-                            </span>
-                          </div>
-
-                          <div className="absolute top-3 right-2 flex items-center gap-1">
-                            <button 
-                              onClick={() => handleOpenEditModal(primary)}
-                              className="text-slate-400 hover:text-slate-800 p-1 rounded-md hover:bg-slate-100 transition-colors"
-                              title="Edit Profile"
-                            >
-                              <Pencil size={13}/>
-                            </button>
-                            <button 
-                              onClick={() => handleDeleteMasterMember(primary)}
-                              className="text-slate-400 hover:text-rose-600 p-1 rounded-md hover:bg-rose-50 transition-colors"
-                              title="Delete Profile"
-                            >
-                              <X size={14}/>
-                            </button>
-                          </div>
-
-                          {dependents.length > 0 ? (
-                            <div className="flex flex-col gap-1.5">
-                              {dependents.map(dep => (
-                                <div key={dep.id} className="flex items-center justify-between bg-slate-50/80 border border-slate-100 rounded-xl p-2 relative group/dep">
-                                  <div className="flex items-center gap-1.5 truncate">
-                                    <span className="text-xs font-bold text-slate-700 uppercase tracking-tight truncate">{dep.full_name}</span>
-                                    {dep.member_type === 'kid' && (
-                                      <span className="text-[7px] font-extrabold uppercase px-1 py-0.5 rounded-md tracking-wider bg-[#FFF3CD] text-[#B47000] shrink-0">
-                                        KID
-                                      </span>
-                                    )}
-                                  </div>
-
-                                  <div className="flex items-center gap-1 shrink-0">
-                                    <button 
-                                      onClick={() => handleOpenEditModal(dep)}
-                                      className="text-slate-400 hover:text-slate-800 p-0.5 rounded hover:bg-slate-200 transition-colors"
-                                      title="Edit Dependent"
-                                    >
-                                      <Pencil size={12}/>
-                                    </button>
-                                    <button 
-                                      onClick={() => handleDeleteMasterMember(dep)}
-                                      className="text-slate-400 hover:text-rose-600 p-0.5 rounded hover:bg-rose-100 transition-colors"
-                                      title="Delete Dependent"
-                                    >
-                                      <X size={13}/>
-                                    </button>
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          ) : (
-                            <div className="text-[10px] text-slate-400 italic py-0.5 px-1">No dependents linked.</div>
-                          )}
-                        </div>
-                      );
-                    })}
+                  <div className="flex items-center gap-3">
+                    <span className="hidden sm:inline-block text-[10px] font-bold text-slate-500 bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-100">
+                      {totalMasterAdults} Adults | {totalMasterKids} Kids | {totalMasterPrimary} Primary | {totalMasterDependent} Dependents
+                    </span>
+                    <button className="p-2 bg-slate-100 hover:bg-slate-200 rounded-xl text-slate-700 transition-colors">
+                      {showMasterDirectory ? <ChevronUp size={16}/> : <ChevronDown size={16}/>}
+                    </button>
                   </div>
                 </div>
+
+                {showMasterDirectory && (
+                  <div className="p-4 sm:p-5 border-t border-slate-100 animate-in fade-in duration-200">
+                    <div className="mb-6 space-y-3">
+                      <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-wider pl-1">Add Profile to Master Record</h4>
+                      <div className="flex flex-col sm:flex-row flex-wrap gap-2.5">
+                        <input 
+                          type="text" 
+                          placeholder="Full Profile Name" 
+                          value={newProfileName} 
+                          onChange={(e) => setNewProfileName(e.target.value)} 
+                          className="flex-1 min-w-[200px] bg-white border border-slate-200 px-3.5 py-2.5 rounded-xl text-xs sm:text-sm font-semibold focus:outline-none text-slate-800"
+                        />
+                        
+                        <select 
+                          value={newProfileType} 
+                          onChange={(e) => setNewProfileType(e.target.value as 'adult' | 'kid')} 
+                          className="w-full sm:w-28 bg-white border border-slate-200 px-3 py-2.5 rounded-xl text-xs sm:text-sm font-semibold focus:outline-none text-slate-700"
+                        >
+                          <option value="adult">Adult</option>
+                          <option value="kid">Kid</option>
+                        </select>
+
+                        <select 
+                          value={newProfileDependentId} 
+                          onChange={(e) => setNewProfileDependentId(e.target.value)} 
+                          className="flex-1 min-w-[200px] bg-white border border-slate-200 px-3 py-2.5 rounded-xl text-xs sm:text-sm font-semibold focus:outline-none text-slate-600"
+                        >
+                          <option value="">Primary / Independent (No Dependency)</option>
+                          {masterMembers.filter((m: MasterMember) => m.member_type === 'adult' && !m.dependent_id).map((m: MasterMember) => (
+                            <option key={m.id} value={m.id}>Under: {m.full_name}</option>
+                          ))}
+                        </select>
+                        
+                        <button 
+                          onClick={handleCreateMasterMember} 
+                          className="w-full sm:w-auto px-5 py-2.5 bg-[#0F172A] text-white font-bold text-[11px] uppercase tracking-widest rounded-xl shadow-xs transition-transform active:scale-95 shrink-0"
+                        >
+                          Save Profile
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="mb-4 relative">
+                      <Search size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                      <input 
+                        type="text" 
+                        placeholder="Search directory by name..." 
+                        value={masterSearchQuery}
+                        onChange={(e) => setMasterSearchQuery(e.target.value)}
+                        className="w-full sm:w-72 bg-white border border-slate-200 pl-9 pr-4 py-2 rounded-xl text-xs font-semibold focus:outline-none text-slate-800 shadow-xs"
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                      {filteredPrimaryMembers.map((primary: MasterMember) => {
+                        const dependents = masterMembers.filter(m => m.dependent_id === primary.id);
+                        
+                        return (
+                          <div key={primary.id} className="bg-white border border-slate-200 rounded-2xl p-3.5 flex flex-col shadow-xs gap-2.5 relative group">
+                            <div className="flex items-center justify-between border-b border-slate-100 pb-2.5 pr-12">
+                              <div className="flex items-center gap-1.5 truncate">
+                                <span className="text-xs sm:text-sm font-bold text-slate-900 uppercase tracking-tight truncate">{primary.full_name}</span>
+                                {primary.member_type === 'kid' && (
+                                  <span className="text-[8px] font-extrabold uppercase px-1.5 py-0.5 rounded-md tracking-wider bg-[#FFF3CD] text-[#B47000] shrink-0">
+                                    KID
+                                  </span>
+                                )}
+                              </div>
+                              <span className="text-[9px] text-slate-400 font-semibold tracking-wide shrink-0">
+                                Primary
+                              </span>
+                            </div>
+
+                            <div className="absolute top-3 right-2 flex items-center gap-1">
+                              <button 
+                                onClick={() => handleOpenEditModal(primary)}
+                                className="text-slate-400 hover:text-slate-800 p-1 rounded-md hover:bg-slate-100 transition-colors"
+                                title="Edit Profile"
+                              >
+                                <Pencil size={13}/>
+                              </button>
+                              <button 
+                                onClick={() => handleDeleteMasterMember(primary)}
+                                className="text-slate-400 hover:text-rose-600 p-1 rounded-md hover:bg-rose-50 transition-colors"
+                                title="Delete Profile"
+                              >
+                                <X size={14}/>
+                              </button>
+                            </div>
+
+                            {dependents.length > 0 ? (
+                              <div className="flex flex-col gap-1.5">
+                                {dependents.map(dep => (
+                                  <div key={dep.id} className="flex items-center justify-between bg-slate-50/80 border border-slate-100 rounded-xl p-2 relative group/dep">
+                                    <div className="flex items-center gap-1.5 truncate">
+                                      <span className="text-xs font-bold text-slate-700 uppercase tracking-tight truncate">{dep.full_name}</span>
+                                      {dep.member_type === 'kid' && (
+                                        <span className="text-[7px] font-extrabold uppercase px-1 py-0.5 rounded-md tracking-wider bg-[#FFF3CD] text-[#B47000] shrink-0">
+                                          KID
+                                        </span>
+                                      )}
+                                    </div>
+
+                                    <div className="flex items-center gap-1 shrink-0">
+                                      <button 
+                                        onClick={() => handleOpenEditModal(dep)}
+                                        className="text-slate-400 hover:text-slate-800 p-0.5 rounded hover:bg-slate-200 transition-colors"
+                                        title="Edit Dependent"
+                                      >
+                                        <Pencil size={12}/>
+                                      </button>
+                                      <button 
+                                        onClick={() => handleDeleteMasterMember(dep)}
+                                        className="text-slate-400 hover:text-rose-600 p-0.5 rounded hover:bg-rose-100 transition-colors"
+                                        title="Delete Dependent"
+                                      >
+                                        <X size={13}/>
+                                      </button>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <div className="text-[10px] text-slate-400 italic py-0.5 px-1">No dependents linked.</div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -1335,21 +1589,17 @@ export default function ActivitiesPage() {
               {/* Metrics Hero */}
               <div className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200/80 shadow-[0_2px_12px_rgba(0,0,0,0.02)] grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
                 <div className="border-r border-slate-100 pr-2 flex flex-col justify-center">
-                  <span className="text-[9px] sm:text-[10px] font-extrabold uppercase text-slate-400 tracking-wider block">Total Expense</span>
+                  <span className="text-[9px] sm:text-[10px] font-extrabold uppercase text-slate-400 tracking-wider block">Grand Total Expense</span>
                   <div className="flex items-center gap-1 mt-1">
                     <span className="text-xs font-bold text-slate-400">MVR</span>
-                    <input 
-                      type="number" 
-                      value={currentActivity.total_expenses} 
-                      onChange={(e) => handleUpdateExpenseVal(currentActivity.id, e.target.value)} 
-                      className="text-base sm:text-2xl font-black text-slate-900 bg-transparent w-full focus:outline-none placeholder-slate-300"
-                      placeholder="0"
-                    />
+                    <span className="text-base sm:text-2xl font-black text-slate-900">
+                      {calculateGrandTotalExpenses(currentActivity).toFixed(2)}
+                    </span>
                   </div>
                 </div>
 
                 <div className="lg:border-r border-slate-100 pr-2 flex flex-col justify-center">
-                  <span className="text-[9px] sm:text-[10px] font-extrabold uppercase text-slate-400 tracking-wider block">Cost / Person (Split)</span>
+                  <span className="text-[9px] sm:text-[10px] font-extrabold uppercase text-slate-400 tracking-wider block">Shared Cost / Person</span>
                   <p className="text-base sm:text-xl font-black text-slate-900 mt-1">MVR {calculateSharePerHead(currentActivity).toFixed(2)}</p>
                 </div>
 
@@ -1376,7 +1626,7 @@ export default function ActivitiesPage() {
                   👥 Attendees
                 </button>
                 <button onClick={() => setActiveHostTab('expenses')} className={`py-2.5 px-3.5 text-[10px] sm:text-xs font-bold uppercase tracking-wider rounded-lg transition-all whitespace-nowrap ${activeTab === 'expenses' ? 'bg-slate-900 text-white shadow-xs' : 'text-slate-500 hover:text-slate-900'}`}>
-                  💸 Expenses
+                  💸 Expenses & Invoices
                 </button>
                 <button onClick={() => setActiveHostTab('finance')} className={`py-2.5 px-3.5 text-[10px] sm:text-xs font-bold uppercase tracking-wider rounded-lg transition-all whitespace-nowrap ${activeTab === 'finance' ? 'bg-slate-900 text-white shadow-xs' : 'text-slate-500 hover:text-slate-900'}`}>
                   📊 Billing Ledger
@@ -1391,23 +1641,15 @@ export default function ActivitiesPage() {
                 <div className="bg-white rounded-2xl border border-slate-200/80 p-3.5 sm:p-6 shadow-[0_2px_12px_rgba(0,0,0,0.02)] space-y-5">
                   <div className="flex flex-col gap-3 bg-slate-50 border border-slate-100 p-3 sm:p-4 rounded-xl">
                     <div className="flex flex-col sm:flex-row gap-2.5 items-stretch sm:items-center justify-between">
-                      <div className="w-full sm:flex-1">
-                        <label className="text-[9px] font-bold uppercase tracking-wider text-slate-400 mb-1 pl-0.5 block">Check-In Single Profile</label>
-                        <select 
-                          defaultValue="" 
-                          onChange={(e) => {
-                            const match = masterMembers.find((m: MasterMember) => m.id === e.target.value);
-                            if (match) handleAddMemberToActivity(currentActivity.id, match);
-                            e.target.value = "";
-                          }} 
-                          className="bg-white border border-slate-200 rounded-xl p-2.5 text-xs font-bold text-slate-800 focus:outline-none w-full"
-                        >
-                          <option value="" disabled>Select Profile from Master Directory...</option>
-                          {masterMembers.map((m: MasterMember) => (
-                            <option key={m.id} value={m.id}>{m.full_name} ({m.member_type.toUpperCase()})</option>
-                          ))}
-                        </select>
-                      </div>
+                      <button 
+                        onClick={() => setIsCheckInModalOpen(true)}
+                        className="w-full sm:flex-1 h-10 px-4 bg-white border border-slate-200 hover:border-slate-300 text-slate-800 font-bold text-xs rounded-xl shadow-xs flex items-center justify-between transition-colors"
+                      >
+                        <span className="flex items-center gap-2">
+                          <UserCheck size={15} className="text-slate-500"/> Add Specific Members from Master...
+                        </span>
+                        <ChevronDown size={14} className="text-slate-400"/>
+                      </button>
 
                       <button 
                         onClick={() => handleImportAllMembers(currentActivity.id)} 
@@ -1420,7 +1662,7 @@ export default function ActivitiesPage() {
                     <div className="w-full border-t border-slate-200/60 pt-2.5 flex items-end gap-2">
                       <div className="flex-grow">
                         <label className="text-[9px] font-bold uppercase tracking-wider text-slate-400 mb-1 pl-0.5 block">Optional: Create Logistics Group</label>
-                        <input type="text" placeholder="e.g. BBQ Setup, Games" value={newGroupName} onChange={(e) => setNewGroupName(e.target.value)} className="w-full bg-white border border-slate-200 p-2 rounded-xl text-xs font-semibold focus:outline-none"/>
+                        <input type="text" placeholder="e.g. BBQ Setup, Games" value={newGroupName} onChange={(e) => setNewGroupName(e.target.value)} className="w-full bg-white border border-slate-200 p-2 rounded-xl text-xs font-semibold focus:outline-none text-slate-800"/>
                       </div>
                       <button onClick={() => handleAddGroupDB(currentActivity)} className="bg-slate-200 hover:bg-slate-300 text-slate-800 text-[10px] font-bold uppercase tracking-wider px-3.5 h-9 rounded-xl transition-colors shrink-0">
                         + Group
@@ -1473,24 +1715,6 @@ export default function ActivitiesPage() {
                               </button>
                             )}
 
-                            {headPart && currentActivity.groups_list && currentActivity.groups_list.length > 0 && (
-                              <div className="pb-1 border-b border-slate-50">
-                                <select 
-                                  value={headPart.assigned_group || ""} 
-                                  onChange={(e) => { 
-                                    handleUpdateParticipantLocal(currentActivity.id, headPart.id, "assigned_group", e.target.value); 
-                                    handleSaveParticipantDB(headPart.id, "assigned_group", e.target.value); 
-                                  }} 
-                                  className="bg-slate-50 border border-slate-100 rounded-lg px-2 py-1 text-[10px] font-semibold text-slate-600 focus:outline-none w-full"
-                                >
-                                  <option value="">Group: Unassigned</option>
-                                  {currentActivity.groups_list.map((g: string, gIdx: number) => (
-                                    <option key={gIdx} value={g}>{g}</option>
-                                  ))}
-                                </select>
-                              </div>
-                            )}
-
                             {familyDependents.length > 0 ? (
                               <div className="flex flex-col gap-1.5">
                                 {familyDependents.map((p: Participant) => {
@@ -1514,24 +1738,6 @@ export default function ActivitiesPage() {
                                       >
                                         <X size={13}/>
                                       </button>
-
-                                      {currentActivity.groups_list && currentActivity.groups_list.length > 0 && (
-                                        <div>
-                                          <select 
-                                            value={p.assigned_group || ""} 
-                                            onChange={(e) => { 
-                                              handleUpdateParticipantLocal(currentActivity.id, p.id, "assigned_group", e.target.value); 
-                                              handleSaveParticipantDB(p.id, "assigned_group", e.target.value); 
-                                            }} 
-                                            className="bg-white border border-slate-200 rounded-lg px-2 py-0.5 text-[9px] font-semibold text-slate-600 focus:outline-none w-full"
-                                          >
-                                            <option value="">Group: Unassigned</option>
-                                            {currentActivity.groups_list.map((g: string, gIdx: number) => (
-                                              <option key={gIdx} value={g}>{g}</option>
-                                            ))}
-                                          </select>
-                                        </div>
-                                      )}
                                     </div>
                                   );
                                 })}
@@ -1547,88 +1753,229 @@ export default function ActivitiesPage() {
                 </div>
               )}
 
-              {/* TAB 2: EXPENSES LOG */}
+              {/* TAB 2: EXPENSES LOG (SHARED & ITEMIZED INVOICES) */}
               {activeTab === 'expenses' && (
-                <div className="bg-white rounded-2xl border border-slate-200/80 p-3.5 sm:p-5 shadow-[0_2px_12px_rgba(0,0,0,0.02)] space-y-5">
-                  <div className="bg-slate-50 border border-slate-100 p-3.5 rounded-xl space-y-3">
-                    <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-wider pl-0.5">Log Expense Entry</h4>
-                    <div className="grid grid-cols-1 sm:grid-cols-12 gap-2.5">
-                      <div className="sm:col-span-5">
-                        <input 
-                          type="text" 
-                          placeholder="Expense Description (e.g. Fuel, BBQ)" 
-                          value={expDesc} 
-                          onChange={(e) => setExpDesc(e.target.value)} 
-                          className="w-full bg-white border border-slate-200 p-2.5 rounded-xl text-xs font-bold text-slate-800 focus:outline-none"
-                        />
-                      </div>
-                      
-                      <div className="sm:col-span-4">
-                        <select 
-                          value={expPaidBy} 
-                          onChange={(e) => setExpPaidBy(e.target.value)} 
-                          className="w-full bg-white border border-slate-200 p-2.5 rounded-xl text-xs font-bold text-slate-800 focus:outline-none"
-                        >
-                          <option value="" disabled>Paid By...</option>
-                          {currentActivity.participants.map((p: Participant) => (
-                            <option key={p.id} value={p.primary_name}>{p.primary_name}</option>
-                          ))}
-                        </select>
-                      </div>
+                <div className="space-y-6">
+                  {/* SECTION A: SHARED EXPENSES (EVERYONE SPLIT EQUALLY) */}
+                  <div className="bg-white rounded-2xl border border-slate-200/80 p-3.5 sm:p-5 shadow-[0_2px_12px_rgba(0,0,0,0.02)] space-y-4">
+                    <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-2">
+                      <Receipt size={16} className="text-slate-500"/> Shared General Expenses (Split Equally to All)
+                    </h3>
 
-                      <div className="sm:col-span-3">
-                        <div className="relative">
-                          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400">MVR</span>
+                    <div className="bg-slate-50 border border-slate-100 p-3.5 rounded-xl space-y-3">
+                      <div className="grid grid-cols-1 sm:grid-cols-12 gap-2.5">
+                        <div className="sm:col-span-5">
                           <input 
-                            type="number" 
-                            placeholder="0.00" 
-                            value={expAmount} 
-                            onChange={(e) => setExpAmount(e.target.value)} 
-                            className="w-full bg-white border border-slate-200 py-2.5 pl-12 pr-3 rounded-xl text-xs font-bold text-slate-800 focus:outline-none"
+                            type="text" 
+                            placeholder="Shared Description (e.g. Speedboat, Canoe Fee)" 
+                            value={expDesc} 
+                            onChange={(e) => setExpDesc(e.target.value)} 
+                            className="w-full bg-white border border-slate-200 p-2.5 rounded-xl text-xs font-bold text-slate-800 focus:outline-none"
                           />
                         </div>
-                      </div>
-                    </div>
-                    
-                    <button 
-                      onClick={() => handleAddExpenseItem(currentActivity.id)} 
-                      className="w-full h-9 bg-slate-900 hover:bg-slate-800 text-white font-bold text-[10px] uppercase tracking-wider rounded-xl shadow-xs transition-transform active:scale-95 flex items-center justify-center gap-1.5"
-                    >
-                      <Plus size={14}/> Add Expense Item
-                    </button>
-                  </div>
+                        
+                        <div className="sm:col-span-4">
+                          <select 
+                            value={expPaidBy} 
+                            onChange={(e) => setExpPaidBy(e.target.value)} 
+                            className="w-full bg-white border border-slate-200 p-2.5 rounded-xl text-xs font-bold text-slate-800 focus:outline-none"
+                          >
+                            <option value="" disabled>Paid By...</option>
+                            {currentActivity.participants.map((p: Participant) => (
+                              <option key={p.id} value={p.primary_name}>{p.primary_name}</option>
+                            ))}
+                          </select>
+                        </div>
 
-                  {/* Responsive Expense List (Card View on Mobile, Table on Desktop) */}
-                  <div className="space-y-2 border-t border-slate-100 pt-4">
-                    {(!currentActivity.expenses_breakdown || currentActivity.expenses_breakdown.length === 0) ? (
-                      <p className="p-8 text-center text-slate-400 font-medium text-xs">No expenses logged yet. Add itemized expenses above.</p>
-                    ) : (
-                      currentActivity.expenses_breakdown.map((item: ExpenseItem) => (
-                        <div key={item.id} className="bg-slate-50 border border-slate-100 p-3 rounded-xl flex items-center justify-between gap-2">
-                          <div className="min-w-0 flex-1">
-                            <p className="font-bold text-slate-800 text-xs truncate">{item.description}</p>
-                            <p className="text-[10px] font-semibold text-slate-500 mt-0.5">Paid by: <span className="text-slate-700">{item.paid_by_name}</span></p>
+                        <div className="sm:col-span-3">
+                          <div className="relative">
+                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400">MVR</span>
+                            <input 
+                              type="number" 
+                              placeholder="0.00" 
+                              value={expAmount} 
+                              onChange={(e) => setExpAmount(e.target.value)} 
+                              className="w-full bg-white border border-slate-200 py-2.5 pl-12 pr-3 rounded-xl text-xs font-bold text-slate-800 focus:outline-none"
+                            />
                           </div>
-                          
-                          <div className="flex items-center gap-3 shrink-0">
-                            <span className="font-black text-slate-900 text-xs sm:text-sm">MVR {parseFloat(item.amount as string).toFixed(2)}</span>
-                            <div className="flex items-center gap-1">
-                              <button 
-                                onClick={() => setEditExpenseModal({
-                                  isOpen: true,
-                                  item,
-                                  desc: item.description,
-                                  paidBy: item.paid_by_name,
-                                  amount: item.amount.toString()
-                                })} 
-                                className="text-slate-400 hover:text-slate-800 p-1 rounded hover:bg-slate-200 transition-colors"
-                              >
-                                <Pencil size={13}/>
-                              </button>
-                              <button onClick={() => handleRemoveExpenseItem(currentActivity.id, item.id)} className="text-slate-300 hover:text-rose-500 p-1 rounded hover:bg-rose-50 transition-colors">
+                        </div>
+                      </div>
+                      
+                      <button 
+                        onClick={() => handleAddExpenseItem(currentActivity.id)} 
+                        className="w-full h-9 bg-slate-900 hover:bg-slate-800 text-white font-bold text-[10px] uppercase tracking-wider rounded-xl shadow-xs transition-transform active:scale-95 flex items-center justify-center gap-1.5"
+                      >
+                        <Plus size={14}/> Add Shared General Expense
+                      </button>
+                    </div>
+
+                    <div className="space-y-2">
+                      {(!currentActivity.expenses_breakdown || currentActivity.expenses_breakdown.length === 0) ? (
+                        <p className="p-4 text-center text-slate-400 font-medium text-xs">No general shared expenses logged.</p>
+                      ) : (
+                        currentActivity.expenses_breakdown.map((item: ExpenseItem) => (
+                          <div key={item.id} className="bg-slate-50 border border-slate-100 p-3 rounded-xl flex items-center justify-between gap-2">
+                            <div className="min-w-0 flex-1">
+                              <p className="font-bold text-slate-800 text-xs truncate">{item.description}</p>
+                              <p className="text-[10px] font-semibold text-slate-500 mt-0.5">Paid by: <span className="text-slate-700">{item.paid_by_name}</span></p>
+                            </div>
+                            
+                            <div className="flex items-center gap-3 shrink-0">
+                              <span className="font-black text-slate-900 text-xs sm:text-sm">MVR {parseFloat(item.amount as string).toFixed(2)}</span>
+                              <button onClick={() => handleRemoveExpenseItem(item.id)} className="text-slate-300 hover:text-rose-500 p-1 rounded hover:bg-rose-50 transition-colors">
                                 <X size={15}/>
                               </button>
                             </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+
+                  {/* SECTION B: ITEMIZED INVOICES (LINK ITEMS TO INDIVIDUAL PEOPLE) */}
+                  <div className="bg-white rounded-2xl border border-slate-200/80 p-3.5 sm:p-5 shadow-[0_2px_12px_rgba(0,0,0,0.02)] space-y-5">
+                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 pb-3 border-b border-slate-100">
+                      <div>
+                        <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-2">
+                          <FileText size={16} className="text-slate-500"/> Itemized Invoices (Meal Orders / Jugo Trips)
+                        </h3>
+                        <p className="text-[10px] text-slate-400 font-semibold mt-0.5">Record items & assign them directly to specific participants.</p>
+                      </div>
+
+                      {/* Add Invoice Header Form */}
+                      <div className="flex items-center gap-2 w-full sm:w-auto">
+                        <input 
+                          type="text" 
+                          placeholder="e.g. Jugo Trip, Restaurant Lunch" 
+                          value={newInvoiceTitle} 
+                          onChange={(e) => setNewInvoiceTitle(e.target.value)} 
+                          className="bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-xl text-xs font-semibold focus:outline-none flex-grow sm:w-48 text-slate-800"
+                        />
+                        <button 
+                          onClick={() => handleCreateInvoice(currentActivity.id)}
+                          className="bg-slate-900 text-white font-bold text-[10px] uppercase px-3 py-2 rounded-xl transition-transform active:scale-95 shrink-0"
+                        >
+                          + New Invoice
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Invoices List */}
+                    {(!currentActivity.invoices || currentActivity.invoices.length === 0) ? (
+                      <div className="py-8 text-center text-slate-400 font-semibold text-xs border border-dashed border-slate-200 rounded-xl">
+                        No itemized invoices created. Add an invoice title above to record restaurant/order receipts.
+                      </div>
+                    ) : (
+                      currentActivity.invoices.map((inv: Invoice) => (
+                        <div key={inv.id} className="bg-slate-50/80 border border-slate-200 rounded-2xl p-4 space-y-4">
+                          <div className="flex justify-between items-center border-b border-slate-200/60 pb-2.5">
+                            <h4 className="font-extrabold text-slate-900 text-sm uppercase tracking-tight">{inv.invoice_title}</h4>
+                            <button onClick={() => handleRemoveInvoice(inv.id)} className="text-slate-400 hover:text-rose-500 p-1">
+                              <Trash2 size={14}/>
+                            </button>
+                          </div>
+
+                          {/* Add Item Form to this Invoice */}
+                          <div className="bg-white border border-slate-200/80 p-3 rounded-xl flex flex-col sm:flex-row gap-2 items-stretch sm:items-center">
+                            <input 
+                              type="text" 
+                              placeholder="Item Name (e.g. Mixberry Mojito)" 
+                              value={targetInvoiceIdForItem === inv.id ? newItemName : ""} 
+                              onChange={(e) => {
+                                setTargetInvoiceIdForItem(inv.id);
+                                setNewItemName(e.target.value);
+                              }}
+                              className="bg-slate-50 border border-slate-200 p-2 rounded-lg text-xs font-semibold focus:outline-none flex-grow text-slate-800"
+                            />
+                            
+                            <div className="flex gap-2">
+                              <input 
+                                type="number" 
+                                placeholder="Qty" 
+                                value={targetInvoiceIdForItem === inv.id ? newItemQty : "1"} 
+                                onChange={(e) => {
+                                  setTargetInvoiceIdForItem(inv.id);
+                                  setNewItemQty(e.target.value);
+                                }}
+                                className="w-16 bg-slate-50 border border-slate-200 p-2 rounded-lg text-xs font-semibold text-center focus:outline-none shrink-0 text-slate-800"
+                              />
+
+                              <input 
+                                type="number" 
+                                placeholder="Total Price (MVR)" 
+                                value={targetInvoiceIdForItem === inv.id ? newItemPrice : ""} 
+                                onChange={(e) => {
+                                  setTargetInvoiceIdForItem(inv.id);
+                                  setNewItemPrice(e.target.value);
+                                }}
+                                className="w-32 bg-slate-50 border border-slate-200 p-2 rounded-lg text-xs font-semibold focus:outline-none shrink-0 text-slate-800"
+                              />
+
+                              <button 
+                                onClick={() => handleAddItemToInvoice(inv.id)}
+                                className="bg-slate-900 hover:bg-slate-800 text-white font-bold text-[10px] uppercase px-3 py-2 rounded-lg shrink-0"
+                              >
+                                + Add
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Invoice Items List with Live Claim Balance Display */}
+                          <div className="space-y-3">
+                            {inv.items.map((item: InvoiceItem) => {
+                              const totalP = parseFloat(item.total_price as string) || 0;
+                              const claimsCount = item.claims?.length || 0;
+                              const isFullyClaimed = claimsCount > 0;
+
+                              return (
+                                <div key={item.id} className="bg-white border border-slate-200/80 rounded-xl p-3.5 space-y-2.5">
+                                  <div className="flex justify-between items-start">
+                                    <div>
+                                      <div className="flex items-center gap-2">
+                                        <span className="font-bold text-slate-900 text-xs sm:text-sm">{item.item_name}</span>
+                                        <span className="text-[10px] font-extrabold text-slate-400 bg-slate-100 px-1.5 py-0.2 rounded">
+                                          x{item.qty}
+                                        </span>
+                                      </div>
+                                      <p className="text-[10px] font-semibold text-slate-400 mt-0.5">
+                                        Total Price: <b className="text-slate-800">MVR {totalP.toFixed(2)}</b>
+                                      </p>
+                                    </div>
+
+                                    <div className="flex items-center gap-2">
+                                      {/* LIVE BALANCE COUNTER */}
+                                      <span className={`text-[10px] font-black uppercase px-2 py-1 rounded-lg border ${isFullyClaimed ? 'bg-emerald-50 text-emerald-600 border-emerald-200' : 'bg-amber-50 text-amber-600 border-amber-200'}`}>
+                                        {isFullyClaimed ? '0 Balance (Assigned) ✅' : `Unassigned: MVR ${totalP.toFixed(2)}`}
+                                      </span>
+
+                                      <button onClick={() => handleRemoveInvoiceItem(item.id)} className="text-slate-300 hover:text-rose-500 p-1">
+                                        <X size={14}/>
+                                      </button>
+                                    </div>
+                                  </div>
+
+                                  {/* Select People for this specific item */}
+                                  <div className="pt-2 border-t border-slate-100">
+                                    <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block mb-1.5">Who Had / Ordered This Item:</span>
+                                    <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto">
+                                      {currentActivity.participants.map((p: Participant) => {
+                                        const isClaimedByMe = item.claims?.some(c => c.participant_id === p.id);
+                                        return (
+                                          <button 
+                                            key={p.id} 
+                                            onClick={() => handleToggleItemClaim(item.id, p.id, item.claims || [])}
+                                            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-bold border transition-colors ${isClaimedByMe ? 'bg-slate-900 text-white border-slate-900 shadow-xs' : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'}`}
+                                          >
+                                            {isClaimedByMe && <Check size={11} className="text-emerald-400"/>}
+                                            <span>{p.primary_name}</span>
+                                          </button>
+                                        );
+                                      })}
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            })}
                           </div>
                         </div>
                       ))
@@ -1673,14 +2020,14 @@ export default function ActivitiesPage() {
                   </div>
 
                   {/* SPLIT CONFIGURATION & BANK SELECTOR */}
-                  <div className="bg-slate-50 border border-slate-100 p-3.5 rounded-xl flex flex-col gap-3 justify-between items-stretch">
+                  <div className="bg-slate-50 border border-slate-100 p-3.5 rounded-xl flex flex-col sm:flex-row gap-3 justify-between items-start sm:items-center">
                     <div>
                       <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
                         <Filter size={14} className="text-slate-500"/> Cost Distribution Rules
                       </h4>
                     </div>
 
-                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto">
                       <select 
                         value={selectedBankIdForInvoice}
                         onChange={(e) => setSelectedBankIdForInvoice(e.target.value)}
@@ -1709,9 +2056,9 @@ export default function ActivitiesPage() {
                     </div>
                   </div>
 
-                  {/* MANUAL EXCLUSION CHECKBOX LIST */}
+                  {/* MANUAL EXCLUSION CHECKBOX LIST FOR GENERAL SHARED EXPENSES */}
                   <div className="bg-slate-50/50 border border-slate-100 p-3 rounded-xl space-y-2">
-                    <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400 block mb-1">Uncheck to Exclude from Bill:</span>
+                    <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400 block mb-1">Uncheck to Exclude from Shared General Expenses:</span>
                     <div className="flex flex-wrap gap-1.5">
                       {currentActivity.participants.map((p: Participant) => {
                         const prof = masterMembers.find((m: MasterMember) => m.id === p.master_member_id);
@@ -1735,48 +2082,49 @@ export default function ActivitiesPage() {
                     </div>
                   </div>
 
-                  {/* MOBILE RESPONSIVE BILLING LEDGER CARDS */}
+                  {/* BILLING LEDGER TABLE CARDS */}
                   <div className="space-y-3 border-t border-slate-100 pt-4">
                     <div className="flex justify-between items-center px-1">
                       <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider">Grouped Responsibilities</h3>
-                      <span className="text-[10px] font-bold text-slate-500">
-                        Share: <b className="text-slate-900">MVR {calculateSharePerHead(currentActivity).toFixed(0)}</b>/pax
-                      </span>
                     </div>
 
                     {getBillingLedgerGrouped(currentActivity).length === 0 ? (
                       <p className="p-8 text-center text-slate-400 font-medium text-xs">No ledger data available. Add attendees first.</p>
                     ) : (
                       getBillingLedgerGrouped(currentActivity).map((item: BillingLedgerItem, idx: number) => (
-                        <div key={idx} className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 flex flex-col gap-2">
-                          <div className="flex justify-between items-start">
-                            <div>
-                              <h4 className="font-bold text-slate-900 text-xs sm:text-sm">{item.headName}</h4>
-                              <p className="text-[10px] text-slate-500 font-semibold mt-0.5">Covering: {item.attendees.join(', ')}</p>
+                        <div key={idx} className="bg-slate-50/80 border border-slate-200 rounded-xl p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center justify-between sm:justify-start gap-2">
+                              <h4 className="font-bold text-slate-900 text-xs sm:text-sm truncate">{item.headName}</h4>
+                              <span className="font-black text-amber-600 text-sm sm:hidden">MVR {item.totalDue.toFixed(0)}</span>
                             </div>
-                            <span className="font-black text-amber-600 text-sm sm:text-base shrink-0 ml-2">MVR {item.totalDue.toFixed(0)}</span>
+                            <p className="text-[10px] text-slate-500 font-semibold mt-0.5 truncate">Covering: {item.attendees.join(', ')}</p>
                           </div>
 
-                          <div className="flex items-center gap-2 pt-2 border-t border-slate-200/60 mt-1">
-                            <button 
-                              onClick={async () => {
-                                const newPaidState = !item.hasPaid;
-                                handleUpdateParticipantLocal(currentActivity.id, item.initialPartId, "has_paid", newPaidState);
-                                await supabase.from('activity_participants').update({ has_paid: newPaidState }).eq('activity_id', currentActivity.id).eq('head_id', currentActivity.participants.find((p: Participant) => p.id === item.initialPartId)?.head_id);
-                                fetchActivitiesData();
-                              }}
-                              className={`flex-1 py-2 rounded-lg font-extrabold text-[10px] uppercase tracking-wider border transition-colors ${item.hasPaid ? 'bg-emerald-50 text-emerald-600 border-emerald-200' : 'bg-amber-50 text-amber-600 border-amber-200'}`}
-                            >
-                              {item.hasPaid ? 'Paid ✅' : 'Mark Paid ⏳'}
-                            </button>
+                          <div className="flex items-center justify-between sm:justify-end gap-3 shrink-0 pt-2 sm:pt-0 border-t sm:border-0 border-slate-200/60">
+                            <span className="font-black text-amber-600 text-base hidden sm:inline-block pr-2">MVR {item.totalDue.toFixed(0)}</span>
 
-                            <button 
-                              onClick={() => handleSharePersonalWhatsApp(currentActivity, item)}
-                              className={`flex-1 py-2 rounded-lg font-bold text-[10px] uppercase tracking-wider transition-colors flex items-center justify-center gap-1.5 ${item.whatsappShared ? 'bg-emerald-600 text-white' : 'bg-slate-900 text-white hover:bg-slate-800'}`}
-                            >
-                              <Send size={12}/>
-                              {item.whatsappShared ? 'Shared ✅' : 'WhatsApp Bill'}
-                            </button>
+                            <div className="flex items-center gap-2 w-full sm:w-auto">
+                              <button 
+                                onClick={async () => {
+                                  const newPaidState = !item.hasPaid;
+                                  handleUpdateParticipantLocal(currentActivity.id, item.initialPartId, "has_paid", newPaidState);
+                                  await supabase.from('activity_participants').update({ has_paid: newPaidState }).eq('activity_id', currentActivity.id).eq('head_id', currentActivity.participants.find((p: Participant) => p.id === item.initialPartId)?.head_id);
+                                  fetchActivitiesData();
+                                }}
+                                className={`flex-1 sm:flex-none px-3 py-1.5 rounded-lg font-black text-[10px] uppercase tracking-wider border transition-colors ${item.hasPaid ? 'bg-emerald-50 text-emerald-600 border-emerald-200' : 'bg-amber-50 text-amber-600 border-amber-200'}`}
+                              >
+                                {item.hasPaid ? 'Paid ✅' : 'Mark Paid ⏳'}
+                              </button>
+
+                              <button 
+                                onClick={() => handleSharePersonalWhatsApp(currentActivity, item)}
+                                className={`flex-1 sm:flex-none px-3.5 py-1.5 rounded-lg font-bold text-[10px] uppercase tracking-wider transition-colors flex items-center justify-center gap-1.5 ${item.whatsappShared ? 'bg-emerald-600 text-white' : 'bg-slate-900 text-white hover:bg-slate-800'}`}
+                              >
+                                <Send size={11}/>
+                                {item.whatsappShared ? 'Shared ✅' : 'Share Bill'}
+                              </button>
+                            </div>
                           </div>
                         </div>
                       ))
