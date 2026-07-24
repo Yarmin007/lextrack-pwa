@@ -528,7 +528,7 @@ export default function ActivitiesPage() {
     }
   };
 
-  // Shared Expense Handlers (Shared equally among all)
+  // Shared Expense Handlers
   const handleAddExpenseItem = async (actId: string) => {
     if (!expDesc.trim()) return showToast("Description is required", "error");
     if (!expPaidBy) return showToast("Select who paid for this expense", "error");
@@ -1569,102 +1569,99 @@ export default function ActivitiesPage() {
             // ==========================================
             // SPECIFIC ACTIVITY DETAILS VIEW
             // ==========================================
-            <div className="space-y-5 sm:space-y-6 animate-in slide-in-from-right-4 duration-300">
+            <div className="space-y-4 sm:space-y-6 animate-in slide-in-from-right-4 duration-300">
               
               {/* Back Button & Header */}
-              <div className="flex flex-col sm:flex-row justify-between sm:items-end gap-3 border-b border-slate-200/60 pb-4">
+              <div className="flex flex-col sm:flex-row justify-between sm:items-end gap-3 border-b border-slate-200/60 pb-3 sm:pb-4">
                 <div>
-                  <button onClick={() => setSelectedActId(null)} className="text-[10px] font-bold text-slate-400 hover:text-slate-800 uppercase tracking-wider flex items-center gap-1 mb-2 transition-colors">
-                    <ChevronLeft size={14}/> Back to Hub Dashboard
+                  <button onClick={() => setSelectedActId(null)} className="text-[10px] font-bold text-slate-400 hover:text-slate-800 uppercase tracking-wider flex items-center gap-1 mb-1.5 transition-colors">
+                    <ChevronLeft size={14}/> Back to Hub
                   </button>
                   <h2 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight leading-tight">{currentActivity.title}</h2>
-                  <p className="text-xs font-semibold text-slate-500 mt-0.5">{currentActivity.activity_date}</p>
+                  <p className="text-[11px] font-semibold text-slate-500 mt-0.5">{currentActivity.activity_date}</p>
                 </div>
                 
-                <button onClick={() => handleDeleteActivity(currentActivity.id)} className="text-rose-500 hover:text-rose-700 text-[10px] font-bold uppercase tracking-wider flex items-center gap-1 bg-rose-50 px-3 py-1.5 rounded-lg border border-rose-100 transition-colors w-fit">
-                  <Trash2 size={13}/> Delete Activity
+                <button onClick={() => handleDeleteActivity(currentActivity.id)} className="text-rose-500 hover:text-rose-700 text-[10px] font-bold uppercase tracking-wider flex items-center gap-1 bg-rose-50 px-2.5 py-1.5 rounded-lg border border-rose-100 transition-colors w-fit">
+                  <Trash2 size={13}/> Delete Event
                 </button>
               </div>
 
               {/* Metrics Hero */}
-              <div className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200/80 shadow-[0_2px_12px_rgba(0,0,0,0.02)] grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+              <div className="bg-white rounded-2xl p-3.5 sm:p-5 border border-slate-200/80 shadow-[0_2px_12px_rgba(0,0,0,0.02)] grid grid-cols-2 lg:grid-cols-4 gap-3">
                 <div className="border-r border-slate-100 pr-2 flex flex-col justify-center">
-                  <span className="text-[9px] sm:text-[10px] font-extrabold uppercase text-slate-400 tracking-wider block">Grand Total Expense</span>
-                  <div className="flex items-center gap-1 mt-1">
-                    <span className="text-xs font-bold text-slate-400">MVR</span>
-                    <span className="text-base sm:text-2xl font-black text-slate-900">
+                  <span className="text-[9px] font-extrabold uppercase text-slate-400 tracking-wider block">Grand Total</span>
+                  <div className="flex items-center gap-1 mt-0.5">
+                    <span className="text-[10px] font-bold text-slate-400">MVR</span>
+                    <span className="text-base sm:text-2xl font-black text-slate-900 truncate">
                       {calculateGrandTotalExpenses(currentActivity).toFixed(2)}
                     </span>
                   </div>
                 </div>
 
                 <div className="lg:border-r border-slate-100 pr-2 flex flex-col justify-center">
-                  <span className="text-[9px] sm:text-[10px] font-extrabold uppercase text-slate-400 tracking-wider block">Shared Cost / Person</span>
-                  <p className="text-base sm:text-xl font-black text-slate-900 mt-1">MVR {calculateSharePerHead(currentActivity).toFixed(2)}</p>
+                  <span className="text-[9px] font-extrabold uppercase text-slate-400 tracking-wider block">Shared Cost / Pax</span>
+                  <p className="text-base sm:text-xl font-black text-slate-900 mt-0.5">MVR {calculateSharePerHead(currentActivity).toFixed(2)}</p>
                 </div>
 
                 <div className="border-r border-slate-100 pr-2 flex flex-col justify-center col-span-1">
-                  <span className="text-[9px] sm:text-[10px] font-extrabold uppercase text-slate-400 tracking-wider block">Total Attendance</span>
-                  <p className="text-base sm:text-xl font-black text-slate-900 mt-1">
-                    {calculateBreakdown(currentActivity).total} pax 
-                    <span className="text-[10px] sm:text-xs font-semibold text-slate-400 block sm:inline sm:ml-1">
+                  <span className="text-[9px] font-extrabold uppercase text-slate-400 tracking-wider block">Attendance</span>
+                  <p className="text-base sm:text-xl font-black text-slate-900 mt-0.5">
+                    {calculateBreakdown(currentActivity).total} pax
+                    <span className="text-[10px] font-semibold text-slate-400 block sm:inline sm:ml-1">
                       ({calculateBreakdown(currentActivity).adults}A, {calculateBreakdown(currentActivity).kids}K)
                     </span>
                   </p>
                 </div>
 
                 <div className="col-span-1 lg:col-span-1 flex flex-col justify-center">
-                  <button onClick={() => setIsBankModalOpen(true)} className="w-full bg-slate-900 hover:bg-slate-800 text-white text-[10px] sm:text-xs font-bold uppercase tracking-wider py-2.5 sm:py-3 rounded-xl shadow-xs flex items-center justify-center gap-1.5 transition-transform active:scale-95">
-                    <Building2 size={13}/> Bank Accounts
+                  <button onClick={() => setIsBankModalOpen(true)} className="w-full bg-slate-900 hover:bg-slate-800 text-white text-[10px] font-bold uppercase tracking-wider py-2 sm:py-3 rounded-xl shadow-xs flex items-center justify-center gap-1 transition-transform active:scale-95">
+                    <Building2 size={13}/> Bank Details
                   </button>
                 </div>
               </div>
 
               {/* TABS NAVIGATION */}
               <div className="bg-white rounded-xl border border-slate-200/80 p-1 flex overflow-x-auto no-scrollbar shadow-xs gap-1">
-                <button onClick={() => setActiveHostTab('roster')} className={`py-2.5 px-3.5 text-[10px] sm:text-xs font-bold uppercase tracking-wider rounded-lg transition-all whitespace-nowrap ${activeTab === 'roster' ? 'bg-slate-900 text-white shadow-xs' : 'text-slate-500 hover:text-slate-900'}`}>
+                <button onClick={() => setActiveHostTab('roster')} className={`py-2 px-3 text-[10px] sm:text-xs font-bold uppercase tracking-wider rounded-lg transition-all whitespace-nowrap ${activeTab === 'roster' ? 'bg-slate-900 text-white shadow-xs' : 'text-slate-500 hover:text-slate-900'}`}>
                   👥 Attendees
                 </button>
-                <button onClick={() => setActiveHostTab('expenses')} className={`py-2.5 px-3.5 text-[10px] sm:text-xs font-bold uppercase tracking-wider rounded-lg transition-all whitespace-nowrap ${activeTab === 'expenses' ? 'bg-slate-900 text-white shadow-xs' : 'text-slate-500 hover:text-slate-900'}`}>
-                  💸 Expenses & Invoices
+                <button onClick={() => setActiveHostTab('expenses')} className={`py-2 px-3 text-[10px] sm:text-xs font-bold uppercase tracking-wider rounded-lg transition-all whitespace-nowrap ${activeTab === 'expenses' ? 'bg-slate-900 text-white shadow-xs' : 'text-slate-500 hover:text-slate-900'}`}>
+                  💸 Expenses & Receipts
                 </button>
-                <button onClick={() => setActiveHostTab('finance')} className={`py-2.5 px-3.5 text-[10px] sm:text-xs font-bold uppercase tracking-wider rounded-lg transition-all whitespace-nowrap ${activeTab === 'finance' ? 'bg-slate-900 text-white shadow-xs' : 'text-slate-500 hover:text-slate-900'}`}>
+                <button onClick={() => setActiveHostTab('finance')} className={`py-2 px-3 text-[10px] sm:text-xs font-bold uppercase tracking-wider rounded-lg transition-all whitespace-nowrap ${activeTab === 'finance' ? 'bg-slate-900 text-white shadow-xs' : 'text-slate-500 hover:text-slate-900'}`}>
                   📊 Billing Ledger
                 </button>
-                <button onClick={() => setActiveHostTab('shopping')} className={`py-2.5 px-3.5 text-[10px] sm:text-xs font-bold uppercase tracking-wider rounded-lg transition-all whitespace-nowrap ${activeTab === 'shopping' ? 'bg-slate-900 text-white shadow-xs' : 'text-slate-500 hover:text-slate-900'}`}>
+                <button onClick={() => setActiveHostTab('shopping')} className={`py-2 px-3 text-[10px] sm:text-xs font-bold uppercase tracking-wider rounded-lg transition-all whitespace-nowrap ${activeTab === 'shopping' ? 'bg-slate-900 text-white shadow-xs' : 'text-slate-500 hover:text-slate-900'}`}>
                   🛒 Shopping
                 </button>
               </div>
 
               {/* TAB 1: ATTENDEES ROSTER */}
               {activeTab === 'roster' && (
-                <div className="bg-white rounded-2xl border border-slate-200/80 p-3.5 sm:p-6 shadow-[0_2px_12px_rgba(0,0,0,0.02)] space-y-5">
-                  <div className="flex flex-col gap-3 bg-slate-50 border border-slate-100 p-3 sm:p-4 rounded-xl">
-                    <div className="flex flex-col sm:flex-row gap-2.5 items-stretch sm:items-center justify-between">
+                <div className="bg-white rounded-2xl border border-slate-200/80 p-3 sm:p-5 shadow-[0_2px_12px_rgba(0,0,0,0.02)] space-y-4">
+                  <div className="flex flex-col gap-2.5 bg-slate-50 border border-slate-100 p-3 rounded-xl">
+                    <div className="flex flex-col sm:flex-row gap-2 items-stretch sm:items-center justify-between">
                       <button 
                         onClick={() => setIsCheckInModalOpen(true)}
-                        className="w-full sm:flex-1 h-10 px-4 bg-white border border-slate-200 hover:border-slate-300 text-slate-800 font-bold text-xs rounded-xl shadow-xs flex items-center justify-between transition-colors"
+                        className="w-full sm:flex-1 h-9 px-3 bg-white border border-slate-200 hover:border-slate-300 text-slate-800 font-bold text-xs rounded-xl shadow-xs flex items-center justify-between transition-colors"
                       >
-                        <span className="flex items-center gap-2">
-                          <UserCheck size={15} className="text-slate-500"/> Add Specific Members from Master...
+                        <span className="flex items-center gap-1.5 truncate">
+                          <UserCheck size={14} className="text-slate-500 shrink-0"/> Select Specific Members...
                         </span>
-                        <ChevronDown size={14} className="text-slate-400"/>
+                        <ChevronDown size={14} className="text-slate-400 shrink-0"/>
                       </button>
 
                       <button 
                         onClick={() => handleImportAllMembers(currentActivity.id)} 
-                        className="w-full sm:w-auto h-10 px-4 bg-slate-900 hover:bg-slate-800 text-white font-bold text-[10px] uppercase tracking-wider rounded-xl shadow-xs transition-transform active:scale-95 flex items-center justify-center gap-1.5 shrink-0"
+                        className="w-full sm:w-auto h-9 px-3.5 bg-slate-900 hover:bg-slate-800 text-white font-bold text-[10px] uppercase tracking-wider rounded-xl shadow-xs transition-transform active:scale-95 flex items-center justify-center gap-1 shrink-0"
                       >
-                        <UserCheck size={14}/> Import All Master
+                        <UserCheck size={13}/> Import All
                       </button>
                     </div>
 
-                    <div className="w-full border-t border-slate-200/60 pt-2.5 flex items-end gap-2">
-                      <div className="flex-grow">
-                        <label className="text-[9px] font-bold uppercase tracking-wider text-slate-400 mb-1 pl-0.5 block">Optional: Create Logistics Group</label>
-                        <input type="text" placeholder="e.g. BBQ Setup, Games" value={newGroupName} onChange={(e) => setNewGroupName(e.target.value)} className="w-full bg-white border border-slate-200 p-2 rounded-xl text-xs font-semibold focus:outline-none text-slate-800"/>
-                      </div>
-                      <button onClick={() => handleAddGroupDB(currentActivity)} className="bg-slate-200 hover:bg-slate-300 text-slate-800 text-[10px] font-bold uppercase tracking-wider px-3.5 h-9 rounded-xl transition-colors shrink-0">
+                    <div className="w-full border-t border-slate-200/60 pt-2 flex items-center gap-2">
+                      <input type="text" placeholder="Logistics Group (e.g. BBQ, Games)" value={newGroupName} onChange={(e) => setNewGroupName(e.target.value)} className="w-full bg-white border border-slate-200 p-2 rounded-xl text-xs font-semibold focus:outline-none"/>
+                      <button onClick={() => handleAddGroupDB(currentActivity)} className="bg-slate-200 hover:bg-slate-300 text-slate-800 text-[10px] font-bold uppercase tracking-wider px-3 h-8 rounded-xl transition-colors shrink-0">
                         + Group
                       </button>
                     </div>
@@ -1683,11 +1680,11 @@ export default function ActivitiesPage() {
                   )}
 
                   {currentActivity.participants.length === 0 ? (
-                    <div className="py-12 text-center text-slate-400 font-semibold text-xs">
-                      No attendees in this activity yet. Check individual members or import everyone above.
+                    <div className="py-10 text-center text-slate-400 font-semibold text-xs">
+                      No attendees added yet. Use the check-in options above.
                     </div>
                   ) : (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                       {Array.from(new Set(currentActivity.participants.map((p: Participant) => p.head_id || p.master_member_id || p.id))).map((headId) => {
                         const headProfile = masterMembers.find((m: MasterMember) => m.id === headId);
                         const headPart = currentActivity.participants.find((p: Participant) => p.master_member_id === headId || p.id === headId);
@@ -1698,7 +1695,7 @@ export default function ActivitiesPage() {
                         );
 
                         return (
-                          <div key={headId} className="bg-white rounded-2xl border border-slate-200 p-3.5 flex flex-col shadow-xs gap-2.5 relative group">
+                          <div key={headId} className="bg-white rounded-2xl border border-slate-200 p-3 flex flex-col shadow-xs gap-2 relative group">
                             <div className="flex items-center justify-between border-b border-slate-100 pb-2 pr-6">
                               <span className="text-xs sm:text-sm font-bold text-slate-900 uppercase tracking-tight truncate">{primaryName}</span>
                               <span className="text-[8px] font-bold text-slate-400 bg-slate-50 px-1.5 py-0.5 rounded border border-slate-100 shrink-0">
@@ -1709,34 +1706,32 @@ export default function ActivitiesPage() {
                             {headPart && (
                               <button 
                                 onClick={() => handleInitiateRemoveParticipant(headPart)} 
-                                className="absolute top-3 right-2 text-slate-300 hover:text-rose-500 p-1 transition-opacity"
+                                className="absolute top-2.5 right-2 text-slate-300 hover:text-rose-500 p-1"
                               >
                                 <X size={14}/>
                               </button>
                             )}
 
                             {familyDependents.length > 0 ? (
-                              <div className="flex flex-col gap-1.5">
+                              <div className="flex flex-col gap-1">
                                 {familyDependents.map((p: Participant) => {
                                   const prof = masterMembers.find((m: MasterMember) => m.id === p.master_member_id);
                                   return (
-                                    <div key={p.id} className="bg-slate-50/80 border border-slate-100 rounded-xl p-2 flex flex-col gap-1.5 relative group/item">
-                                      <div className="flex items-center justify-between pr-5">
-                                        <div className="flex items-center gap-1.5 truncate">
-                                          <span className="text-xs font-bold text-slate-800 uppercase tracking-tight truncate">{prof?.full_name || p.primary_name}</span>
-                                          {prof?.member_type === 'kid' && (
-                                            <span className="text-[7px] font-extrabold uppercase px-1 py-0.2 rounded bg-[#FFF3CD] text-[#B47000] shrink-0">
-                                              KID
-                                            </span>
-                                          )}
-                                        </div>
+                                    <div key={p.id} className="bg-slate-50/80 border border-slate-100 rounded-xl p-1.5 flex items-center justify-between relative">
+                                      <div className="flex items-center gap-1.5 truncate pr-5">
+                                        <span className="text-xs font-bold text-slate-800 uppercase tracking-tight truncate">{prof?.full_name || p.primary_name}</span>
+                                        {prof?.member_type === 'kid' && (
+                                          <span className="text-[7px] font-extrabold uppercase px-1 py-0.2 rounded bg-[#FFF3CD] text-[#B47000] shrink-0">
+                                            KID
+                                          </span>
+                                        )}
                                       </div>
 
                                       <button 
                                         onClick={() => handleInitiateRemoveParticipant(p)} 
-                                        className="absolute top-1.5 right-1.5 text-slate-300 hover:text-rose-500 p-0.5"
+                                        className="text-slate-300 hover:text-rose-500 p-0.5"
                                       >
-                                        <X size={13}/>
+                                        <X size={12}/>
                                       </button>
                                     </div>
                                   );
@@ -1755,75 +1750,69 @@ export default function ActivitiesPage() {
 
               {/* TAB 2: EXPENSES LOG (SHARED & ITEMIZED INVOICES) */}
               {activeTab === 'expenses' && (
-                <div className="space-y-6">
+                <div className="space-y-4 sm:space-y-6">
                   {/* SECTION A: SHARED EXPENSES (EVERYONE SPLIT EQUALLY) */}
-                  <div className="bg-white rounded-2xl border border-slate-200/80 p-3.5 sm:p-5 shadow-[0_2px_12px_rgba(0,0,0,0.02)] space-y-4">
-                    <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-2">
-                      <Receipt size={16} className="text-slate-500"/> Shared General Expenses (Split Equally to All)
+                  <div className="bg-white rounded-2xl border border-slate-200/80 p-3 sm:p-5 shadow-[0_2px_12px_rgba(0,0,0,0.02)] space-y-3">
+                    <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
+                      <Receipt size={15} className="text-slate-500"/> Shared Expenses (Equal Split)
                     </h3>
 
-                    <div className="bg-slate-50 border border-slate-100 p-3.5 rounded-xl space-y-3">
-                      <div className="grid grid-cols-1 sm:grid-cols-12 gap-2.5">
-                        <div className="sm:col-span-5">
-                          <input 
-                            type="text" 
-                            placeholder="Shared Description (e.g. Speedboat, Canoe Fee)" 
-                            value={expDesc} 
-                            onChange={(e) => setExpDesc(e.target.value)} 
-                            className="w-full bg-white border border-slate-200 p-2.5 rounded-xl text-xs font-bold text-slate-800 focus:outline-none"
-                          />
-                        </div>
+                    <div className="bg-slate-50 border border-slate-100 p-3 rounded-xl space-y-2.5">
+                      <div className="grid grid-cols-1 sm:grid-cols-12 gap-2">
+                        <input 
+                          type="text" 
+                          placeholder="Description (e.g. Speedboat Fuel)" 
+                          value={expDesc} 
+                          onChange={(e) => setExpDesc(e.target.value)} 
+                          className="sm:col-span-5 w-full bg-white border border-slate-200 p-2 rounded-xl text-xs font-bold text-slate-800 focus:outline-none"
+                        />
                         
-                        <div className="sm:col-span-4">
-                          <select 
-                            value={expPaidBy} 
-                            onChange={(e) => setExpPaidBy(e.target.value)} 
-                            className="w-full bg-white border border-slate-200 p-2.5 rounded-xl text-xs font-bold text-slate-800 focus:outline-none"
-                          >
-                            <option value="" disabled>Paid By...</option>
-                            {currentActivity.participants.map((p: Participant) => (
-                              <option key={p.id} value={p.primary_name}>{p.primary_name}</option>
-                            ))}
-                          </select>
-                        </div>
+                        <select 
+                          value={expPaidBy} 
+                          onChange={(e) => setExpPaidBy(e.target.value)} 
+                          className="sm:col-span-4 w-full bg-white border border-slate-200 p-2 rounded-xl text-xs font-bold text-slate-800 focus:outline-none"
+                        >
+                          <option value="" disabled>Paid By...</option>
+                          {currentActivity.participants.map((p: Participant) => (
+                            <option key={p.id} value={p.primary_name}>{p.primary_name}</option>
+                          ))}
+                        </select>
 
-                        <div className="sm:col-span-3">
-                          <div className="relative">
-                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400">MVR</span>
-                            <input 
-                              type="number" 
-                              placeholder="0.00" 
-                              value={expAmount} 
-                              onChange={(e) => setExpAmount(e.target.value)} 
-                              className="w-full bg-white border border-slate-200 py-2.5 pl-12 pr-3 rounded-xl text-xs font-bold text-slate-800 focus:outline-none"
-                            />
-                          </div>
+                        <div className="sm:col-span-3 relative">
+                          <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400">MVR</span>
+                          <input 
+                            type="number" 
+                            placeholder="0.00" 
+                            value={expAmount} 
+                            onChange={(e) => setExpAmount(e.target.value)} 
+                            className="w-full bg-white border border-slate-200 py-2 pl-11 pr-2 rounded-xl text-xs font-bold text-slate-800 focus:outline-none"
+                          />
                         </div>
                       </div>
                       
                       <button 
                         onClick={() => handleAddExpenseItem(currentActivity.id)} 
-                        className="w-full h-9 bg-slate-900 hover:bg-slate-800 text-white font-bold text-[10px] uppercase tracking-wider rounded-xl shadow-xs transition-transform active:scale-95 flex items-center justify-center gap-1.5"
+                        className="w-full h-8.5 bg-slate-900 hover:bg-slate-800 text-white font-bold text-[10px] uppercase tracking-wider rounded-xl shadow-xs flex items-center justify-center gap-1.5"
                       >
-                        <Plus size={14}/> Add Shared General Expense
+                        <Plus size={13}/> Add Shared Expense
                       </button>
                     </div>
 
-                    <div className="space-y-2">
+                    <div className="space-y-1.5">
                       {(!currentActivity.expenses_breakdown || currentActivity.expenses_breakdown.length === 0) ? (
-                        <p className="p-4 text-center text-slate-400 font-medium text-xs">No general shared expenses logged.</p>
+                        <p className="p-3 text-center text-slate-400 font-medium text-[11px]">No general shared expenses added.</p>
                       ) : (
                         currentActivity.expenses_breakdown.map((item: ExpenseItem) => (
-                          <div key={item.id} className="bg-slate-50 border border-slate-100 p-3 rounded-xl flex items-center justify-between gap-2">
+                          <div key={item.id} className="bg-slate-50 border border-slate-100 p-2.5 rounded-xl flex items-center justify-between gap-2">
                             <div className="min-w-0 flex-1">
                               <p className="font-bold text-slate-800 text-xs truncate">{item.description}</p>
-                              <p className="text-[10px] font-semibold text-slate-500 mt-0.5">Paid by: <span className="text-slate-700">{item.paid_by_name}</span></p>
+                              <p className="text-[9px] font-semibold text-slate-400">Paid by: <span className="text-slate-700">{item.paid_by_name}</span></p>
                             </div>
                             
-                            <div className="flex items-center gap-3 shrink-0">
-                              <span className="font-black text-slate-900 text-xs sm:text-sm">MVR {parseFloat(item.amount as string).toFixed(2)}</span>
-                              <button onClick={() => handleRemoveExpenseItem(item.id)} className="text-slate-300 hover:text-rose-500 p-1 rounded hover:bg-rose-50 transition-colors">
-                                <X size={15}/>
+                            <div className="flex items-center gap-2 shrink-0">
+                              <span className="font-black text-slate-900 text-xs">MVR {parseFloat(item.amount as string).toFixed(2)}</span>
+                              <button onClick={() => handleRemoveExpenseItem(item.id)} className="text-slate-300 hover:text-rose-500 p-1">
+                                <X size={14}/>
                               </button>
                             </div>
                           </div>
@@ -1832,51 +1821,50 @@ export default function ActivitiesPage() {
                     </div>
                   </div>
 
-                  {/* SECTION B: ITEMIZED INVOICES (LINK ITEMS TO INDIVIDUAL PEOPLE) */}
-                  <div className="bg-white rounded-2xl border border-slate-200/80 p-3.5 sm:p-5 shadow-[0_2px_12px_rgba(0,0,0,0.02)] space-y-5">
-                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 pb-3 border-b border-slate-100">
+                  {/* SECTION B: ITEMIZED INVOICES */}
+                  <div className="bg-white rounded-2xl border border-slate-200/80 p-3 sm:p-5 shadow-[0_2px_12px_rgba(0,0,0,0.02)] space-y-4">
+                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 pb-2 border-b border-slate-100">
                       <div>
-                        <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-2">
-                          <FileText size={16} className="text-slate-500"/> Itemized Invoices (Meal Orders / Jugo Trips)
+                        <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
+                          <FileText size={15} className="text-slate-500"/> Itemized Receipts (Meal Orders / Trips)
                         </h3>
-                        <p className="text-[10px] text-slate-400 font-semibold mt-0.5">Record items & assign them directly to specific participants.</p>
                       </div>
 
-                      {/* Add Invoice Header Form */}
-                      <div className="flex items-center gap-2 w-full sm:w-auto">
+                      {/* Add Receipt Header */}
+                      <div className="flex items-center gap-1.5 w-full sm:w-auto">
                         <input 
                           type="text" 
-                          placeholder="e.g. Jugo Trip, Restaurant Lunch" 
+                          placeholder="e.g. Jugo Trip, Cafe Lunch" 
                           value={newInvoiceTitle} 
                           onChange={(e) => setNewInvoiceTitle(e.target.value)} 
-                          className="bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-xl text-xs font-semibold focus:outline-none flex-grow sm:w-48 text-slate-800"
+                          className="bg-slate-50 border border-slate-200 px-2.5 py-1 rounded-xl text-xs font-semibold focus:outline-none grow sm:w-44 text-slate-800"
                         />
                         <button 
                           onClick={() => handleCreateInvoice(currentActivity.id)}
-                          className="bg-slate-900 text-white font-bold text-[10px] uppercase px-3 py-2 rounded-xl transition-transform active:scale-95 shrink-0"
+                          className="bg-slate-900 text-white font-bold text-[10px] uppercase px-3 py-1.5 rounded-xl shrink-0"
                         >
-                          + New Invoice
+                          + Receipt
                         </button>
                       </div>
                     </div>
 
                     {/* Invoices List */}
                     {(!currentActivity.invoices || currentActivity.invoices.length === 0) ? (
-                      <div className="py-8 text-center text-slate-400 font-semibold text-xs border border-dashed border-slate-200 rounded-xl">
-                        No itemized invoices created. Add an invoice title above to record restaurant/order receipts.
+                      <div className="py-6 text-center text-slate-400 font-semibold text-xs border border-dashed border-slate-200 rounded-xl">
+                        No itemized receipts created yet.
                       </div>
                     ) : (
                       currentActivity.invoices.map((inv: Invoice) => (
-                        <div key={inv.id} className="bg-slate-50/80 border border-slate-200 rounded-2xl p-4 space-y-4">
-                          <div className="flex justify-between items-center border-b border-slate-200/60 pb-2.5">
-                            <h4 className="font-extrabold text-slate-900 text-sm uppercase tracking-tight">{inv.invoice_title}</h4>
-                            <button onClick={() => handleRemoveInvoice(inv.id)} className="text-slate-400 hover:text-rose-500 p-1">
-                              <Trash2 size={14}/>
+                        <div key={inv.id} className="bg-slate-50/80 border border-slate-200 rounded-2xl p-3 space-y-3">
+                          <div className="flex justify-between items-center border-b border-slate-200/60 pb-2">
+                            <h4 className="font-black text-slate-900 text-xs uppercase tracking-tight">{inv.invoice_title}</h4>
+                            <button onClick={() => handleRemoveInvoice(inv.id)} className="text-slate-400 hover:text-rose-500 p-0.5">
+                              <Trash2 size={13}/>
                             </button>
                           </div>
 
-                          {/* Add Item Form to this Invoice */}
-                          <div className="bg-white border border-slate-200/80 p-3 rounded-xl flex flex-col sm:flex-row gap-2 items-stretch sm:items-center">
+                          {/* Add Item Form to Invoice */}
+                          <div className="bg-white border border-slate-200/80 p-2.5 rounded-xl flex flex-col sm:flex-row gap-1.5 items-stretch sm:items-center">
                             <input 
                               type="text" 
                               placeholder="Item Name (e.g. Mixberry Mojito)" 
@@ -1885,10 +1873,10 @@ export default function ActivitiesPage() {
                                 setTargetInvoiceIdForItem(inv.id);
                                 setNewItemName(e.target.value);
                               }}
-                              className="bg-slate-50 border border-slate-200 p-2 rounded-lg text-xs font-semibold focus:outline-none flex-grow text-slate-800"
+                              className="bg-slate-50 border border-slate-200 p-1.5 rounded-lg text-xs font-semibold focus:outline-none grow text-slate-800"
                             />
                             
-                            <div className="flex gap-2">
+                            <div className="flex gap-1.5">
                               <input 
                                 type="number" 
                                 placeholder="Qty" 
@@ -1897,77 +1885,76 @@ export default function ActivitiesPage() {
                                   setTargetInvoiceIdForItem(inv.id);
                                   setNewItemQty(e.target.value);
                                 }}
-                                className="w-16 bg-slate-50 border border-slate-200 p-2 rounded-lg text-xs font-semibold text-center focus:outline-none shrink-0 text-slate-800"
+                                className="w-12 bg-slate-50 border border-slate-200 p-1.5 rounded-lg text-xs font-semibold text-center focus:outline-none shrink-0 text-slate-800"
                               />
 
                               <input 
                                 type="number" 
-                                placeholder="Total Price (MVR)" 
+                                placeholder="Total MVR" 
                                 value={targetInvoiceIdForItem === inv.id ? newItemPrice : ""} 
                                 onChange={(e) => {
                                   setTargetInvoiceIdForItem(inv.id);
                                   setNewItemPrice(e.target.value);
                                 }}
-                                className="w-32 bg-slate-50 border border-slate-200 p-2 rounded-lg text-xs font-semibold focus:outline-none shrink-0 text-slate-800"
+                                className="w-24 bg-slate-50 border border-slate-200 p-1.5 rounded-lg text-xs font-semibold focus:outline-none shrink-0 text-slate-800"
                               />
 
                               <button 
                                 onClick={() => handleAddItemToInvoice(inv.id)}
-                                className="bg-slate-900 hover:bg-slate-800 text-white font-bold text-[10px] uppercase px-3 py-2 rounded-lg shrink-0"
+                                className="bg-slate-900 text-white font-bold text-[10px] uppercase px-2.5 py-1.5 rounded-lg shrink-0"
                               >
                                 + Add
                               </button>
                             </div>
                           </div>
 
-                          {/* Invoice Items List with Live Claim Balance Display */}
-                          <div className="space-y-3">
+                          {/* Items List with Live Claim Toggles */}
+                          <div className="space-y-2">
                             {inv.items.map((item: InvoiceItem) => {
                               const totalP = parseFloat(item.total_price as string) || 0;
                               const claimsCount = item.claims?.length || 0;
                               const isFullyClaimed = claimsCount > 0;
 
                               return (
-                                <div key={item.id} className="bg-white border border-slate-200/80 rounded-xl p-3.5 space-y-2.5">
-                                  <div className="flex justify-between items-start">
-                                    <div>
-                                      <div className="flex items-center gap-2">
-                                        <span className="font-bold text-slate-900 text-xs sm:text-sm">{item.item_name}</span>
-                                        <span className="text-[10px] font-extrabold text-slate-400 bg-slate-100 px-1.5 py-0.2 rounded">
+                                <div key={item.id} className="bg-white border border-slate-200/80 rounded-xl p-2.5 space-y-2">
+                                  <div className="flex justify-between items-start gap-1">
+                                    <div className="min-w-0 flex-1">
+                                      <div className="flex items-center gap-1.5">
+                                        <span className="font-bold text-slate-900 text-xs truncate">{item.item_name}</span>
+                                        <span className="text-[9px] font-extrabold text-slate-400 bg-slate-100 px-1 py-0.2 rounded shrink-0">
                                           x{item.qty}
                                         </span>
                                       </div>
                                       <p className="text-[10px] font-semibold text-slate-400 mt-0.5">
-                                        Total Price: <b className="text-slate-800">MVR {totalP.toFixed(2)}</b>
+                                        Price: <b className="text-slate-800">MVR {totalP.toFixed(2)}</b>
                                       </p>
                                     </div>
 
-                                    <div className="flex items-center gap-2">
-                                      {/* LIVE BALANCE COUNTER */}
-                                      <span className={`text-[10px] font-black uppercase px-2 py-1 rounded-lg border ${isFullyClaimed ? 'bg-emerald-50 text-emerald-600 border-emerald-200' : 'bg-amber-50 text-amber-600 border-amber-200'}`}>
-                                        {isFullyClaimed ? '0 Balance (Assigned) ✅' : `Unassigned: MVR ${totalP.toFixed(2)}`}
+                                    <div className="flex items-center gap-1.5 shrink-0">
+                                      <span className={`text-[9px] font-black uppercase px-1.5 py-0.5 rounded border ${isFullyClaimed ? 'bg-emerald-50 text-emerald-600 border-emerald-200' : 'bg-amber-50 text-amber-600 border-amber-200'}`}>
+                                        {isFullyClaimed ? '0 Balance ✅' : `Unassigned`}
                                       </span>
 
-                                      <button onClick={() => handleRemoveInvoiceItem(item.id)} className="text-slate-300 hover:text-rose-500 p-1">
-                                        <X size={14}/>
+                                      <button onClick={() => handleRemoveInvoiceItem(item.id)} className="text-slate-300 hover:text-rose-500 p-0.5">
+                                        <X size={13}/>
                                       </button>
                                     </div>
                                   </div>
 
-                                  {/* Select People for this specific item */}
-                                  <div className="pt-2 border-t border-slate-100">
-                                    <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block mb-1.5">Who Had / Ordered This Item:</span>
-                                    <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto">
+                                  {/* Mobile Responsive Player Claims Row */}
+                                  <div className="pt-1.5 border-t border-slate-100">
+                                    <span className="text-[8px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Assigned To:</span>
+                                    <div className="flex gap-1 overflow-x-auto pb-1 no-scrollbar">
                                       {currentActivity.participants.map((p: Participant) => {
                                         const isClaimedByMe = item.claims?.some(c => c.participant_id === p.id);
                                         return (
                                           <button 
                                             key={p.id} 
                                             onClick={() => handleToggleItemClaim(item.id, p.id, item.claims || [])}
-                                            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-bold border transition-colors ${isClaimedByMe ? 'bg-slate-900 text-white border-slate-900 shadow-xs' : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'}`}
+                                            className={`flex items-center gap-1 px-2 py-0.5 rounded-md text-[9px] font-bold border shrink-0 transition-colors ${isClaimedByMe ? 'bg-slate-900 text-white border-slate-900' : 'bg-slate-50 text-slate-600 border-slate-200'}`}
                                           >
-                                            {isClaimedByMe && <Check size={11} className="text-emerald-400"/>}
-                                            <span>{p.primary_name}</span>
+                                            {isClaimedByMe && <Check size={10} className="text-emerald-400"/>}
+                                            <span className="truncate max-w-20">{p.primary_name}</span>
                                           </button>
                                         );
                                       })}
@@ -1986,31 +1973,31 @@ export default function ActivitiesPage() {
 
               {/* TAB 3: FINANCES / BILLING LEDGER */}
               {activeTab === 'finance' && (
-                <div className="bg-white rounded-2xl border border-slate-200/80 p-3.5 sm:p-5 shadow-[0_2px_12px_rgba(0,0,0,0.02)] space-y-5">
+                <div className="bg-white rounded-2xl border border-slate-200/80 p-3 sm:p-5 shadow-[0_2px_12px_rgba(0,0,0,0.02)] space-y-4">
                   
-                  {/* FINANCIAL SUMMARY CARDS */}
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                    <div className="bg-slate-50 border border-slate-100 p-3.5 rounded-xl flex flex-col justify-center">
+                  {/* SUMMARY CARDS */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                    <div className="bg-slate-50 border border-slate-100 p-3 rounded-xl flex flex-col justify-center">
                       <span className="text-[9px] font-extrabold uppercase text-slate-400 tracking-wider">Total Received</span>
-                      <p className="text-lg sm:text-xl font-black text-emerald-600 mt-0.5">MVR {receivedMetrics.totalCollected.toFixed(0)}</p>
+                      <p className="text-base sm:text-xl font-black text-emerald-600 mt-0.5">MVR {receivedMetrics.totalCollected.toFixed(0)}</p>
                     </div>
 
-                    <div className="bg-slate-50 border border-slate-100 p-3.5 rounded-xl flex flex-col justify-center">
+                    <div className="bg-slate-50 border border-slate-100 p-3 rounded-xl flex flex-col justify-center">
                       <span className="text-[9px] font-extrabold uppercase text-slate-400 tracking-wider">Total Pending</span>
-                      <p className="text-lg sm:text-xl font-black text-amber-600 mt-0.5">MVR {receivedMetrics.totalOutstanding.toFixed(0)}</p>
+                      <p className="text-base sm:text-xl font-black text-amber-600 mt-0.5">MVR {receivedMetrics.totalOutstanding.toFixed(0)}</p>
                     </div>
 
-                    <div className="bg-slate-50 border border-slate-100 p-3.5 rounded-xl flex flex-col justify-center">
-                      <span className="text-[9px] font-extrabold uppercase text-slate-400 tracking-wider">Collection Progress</span>
+                    <div className="bg-slate-50 border border-slate-100 p-3 rounded-xl flex flex-col justify-center">
+                      <span className="text-[9px] font-extrabold uppercase text-slate-400 tracking-wider">Progress</span>
                       <div className="flex items-center justify-between mt-0.5">
-                        <span className="text-xs sm:text-sm font-black text-slate-800">
+                        <span className="text-xs font-black text-slate-800">
                           {((receivedMetrics.totalCollected / ((receivedMetrics.totalCollected + receivedMetrics.totalOutstanding) || 1)) * 100).toFixed(0)}%
                         </span>
                         <span className="text-[9px] font-bold text-slate-400">
-                          Target: MVR {(receivedMetrics.totalCollected + receivedMetrics.totalOutstanding).toFixed(0)}
+                          Target: { (receivedMetrics.totalCollected + receivedMetrics.totalOutstanding).toFixed(0) } MVR
                         </span>
                       </div>
-                      <div className="w-full bg-slate-200 h-1.5 rounded-full mt-1 overflow-hidden">
+                      <div className="w-full bg-slate-200 h-1 rounded-full mt-1 overflow-hidden">
                         <div 
                           className="bg-emerald-500 h-full transition-all duration-300"
                           style={{ width: `${Math.min(100, (receivedMetrics.totalCollected / ((receivedMetrics.totalCollected + receivedMetrics.totalOutstanding) || 1)) * 100)}%` }}
@@ -2019,36 +2006,34 @@ export default function ActivitiesPage() {
                     </div>
                   </div>
 
-                  {/* SPLIT CONFIGURATION & BANK SELECTOR */}
-                  <div className="bg-slate-50 border border-slate-100 p-3.5 rounded-xl flex flex-col sm:flex-row gap-3 justify-between items-start sm:items-center">
-                    <div>
-                      <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
-                        <Filter size={14} className="text-slate-500"/> Cost Distribution Rules
-                      </h4>
-                    </div>
+                  {/* SPLIT CONTROLS */}
+                  <div className="bg-slate-50 border border-slate-100 p-3 rounded-xl flex flex-col sm:flex-row gap-2.5 justify-between items-stretch sm:items-center">
+                    <span className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-1">
+                      <Filter size={13} className="text-slate-500"/> Split Rules
+                    </span>
 
-                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto">
+                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
                       <select 
                         value={selectedBankIdForInvoice}
                         onChange={(e) => setSelectedBankIdForInvoice(e.target.value)}
-                        className="bg-white border border-slate-200 px-3 py-2 rounded-xl text-xs font-bold text-slate-700 focus:outline-none shadow-xs w-full sm:w-auto"
+                        className="bg-white border border-slate-200 px-2.5 py-1.5 rounded-xl text-xs font-bold text-slate-700 focus:outline-none"
                       >
-                        <option value="" disabled>Select Invoice Bank...</option>
+                        <option value="" disabled>Select Bank...</option>
                         {bankAccounts.map((b: BankAccount) => (
                           <option key={b.id} value={b.id}>Bank: {b.account_name} ({b.currency})</option>
                         ))}
                       </select>
 
-                      <div className="flex items-center gap-1 bg-white border border-slate-200 p-1 rounded-xl shadow-xs w-full sm:w-auto">
+                      <div className="flex items-center gap-1 bg-white border border-slate-200 p-1 rounded-xl">
                         <button 
                           onClick={() => handleUpdateSplitMode(currentActivity.id, 'all')}
-                          className={`flex-1 sm:flex-none px-3 py-1.5 rounded-lg text-[10px] sm:text-xs font-bold uppercase tracking-wider transition-colors ${currentActivity.split_mode === 'all' ? 'bg-slate-900 text-white shadow-xs' : 'text-slate-500'}`}
+                          className={`flex-1 sm:flex-none px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase transition-colors ${currentActivity.split_mode === 'all' ? 'bg-slate-900 text-white' : 'text-slate-500'}`}
                         >
                           All ({currentActivity.participants.length})
                         </button>
                         <button 
                           onClick={() => handleUpdateSplitMode(currentActivity.id, 'adults_only')}
-                          className={`flex-1 sm:flex-none px-3 py-1.5 rounded-lg text-[10px] sm:text-xs font-bold uppercase tracking-wider transition-colors ${currentActivity.split_mode === 'adults_only' ? 'bg-slate-900 text-white shadow-xs' : 'text-slate-500'}`}
+                          className={`flex-1 sm:flex-none px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase transition-colors ${currentActivity.split_mode === 'adults_only' ? 'bg-slate-900 text-white' : 'text-slate-500'}`}
                         >
                           Adults Only ({calculateBreakdown(currentActivity).adults})
                         </button>
@@ -2056,10 +2041,10 @@ export default function ActivitiesPage() {
                     </div>
                   </div>
 
-                  {/* MANUAL EXCLUSION CHECKBOX LIST FOR GENERAL SHARED EXPENSES */}
-                  <div className="bg-slate-50/50 border border-slate-100 p-3 rounded-xl space-y-2">
-                    <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400 block mb-1">Uncheck to Exclude from Shared General Expenses:</span>
-                    <div className="flex flex-wrap gap-1.5">
+                  {/* MANUAL EXCLUSION CHECKBOX LIST */}
+                  <div className="bg-slate-50/50 border border-slate-100 p-2.5 rounded-xl space-y-1.5">
+                    <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400 block">Uncheck to Exclude from Shared Expenses:</span>
+                    <div className="flex flex-wrap gap-1">
                       {currentActivity.participants.map((p: Participant) => {
                         const prof = masterMembers.find((m: MasterMember) => m.id === p.master_member_id);
                         const exclusions = currentActivity.manual_exclusions || [];
@@ -2067,7 +2052,7 @@ export default function ActivitiesPage() {
                         const isKidByMode = currentActivity.split_mode === 'adults_only' && prof?.member_type === 'kid';
 
                         return (
-                          <label key={p.id} className={`flex items-center gap-1 border px-2 py-0.5 rounded-lg cursor-pointer text-[11px] font-bold transition-all ${isExcluded || isKidByMode ? 'bg-slate-100 text-slate-400 border-slate-200 line-through' : 'bg-white text-slate-800 border-slate-200 shadow-xs'}`}>
+                          <label key={p.id} className={`flex items-center gap-1 border px-2 py-0.5 rounded-md cursor-pointer text-[10px] font-bold transition-all ${isExcluded || isKidByMode ? 'bg-slate-100 text-slate-400 border-slate-200 line-through' : 'bg-white text-slate-800 border-slate-200'}`}>
                             <input 
                               type="checkbox" 
                               checked={!isExcluded && !isKidByMode}
@@ -2082,29 +2067,27 @@ export default function ActivitiesPage() {
                     </div>
                   </div>
 
-                  {/* BILLING LEDGER TABLE CARDS */}
-                  <div className="space-y-3 border-t border-slate-100 pt-4">
-                    <div className="flex justify-between items-center px-1">
-                      <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider">Grouped Responsibilities</h3>
-                    </div>
+                  {/* BILLING LEDGER ITEMS */}
+                  <div className="space-y-2 border-t border-slate-100 pt-3">
+                    <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider px-1">Grouped Dues</h3>
 
                     {getBillingLedgerGrouped(currentActivity).length === 0 ? (
-                      <p className="p-8 text-center text-slate-400 font-medium text-xs">No ledger data available. Add attendees first.</p>
+                      <p className="p-6 text-center text-slate-400 font-medium text-xs">No ledger data available. Add attendees first.</p>
                     ) : (
                       getBillingLedgerGrouped(currentActivity).map((item: BillingLedgerItem, idx: number) => (
-                        <div key={idx} className="bg-slate-50/80 border border-slate-200 rounded-xl p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div key={idx} className="bg-slate-50/80 border border-slate-200 rounded-xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
                           <div className="min-w-0 flex-1">
                             <div className="flex items-center justify-between sm:justify-start gap-2">
                               <h4 className="font-bold text-slate-900 text-xs sm:text-sm truncate">{item.headName}</h4>
-                              <span className="font-black text-amber-600 text-sm sm:hidden">MVR {item.totalDue.toFixed(0)}</span>
+                              <span className="font-black text-amber-600 text-xs sm:hidden">MVR {item.totalDue.toFixed(0)}</span>
                             </div>
-                            <p className="text-[10px] text-slate-500 font-semibold mt-0.5 truncate">Covering: {item.attendees.join(', ')}</p>
+                            <p className="text-[10px] text-slate-500 font-semibold mt-0.5 truncate">For: {item.attendees.join(', ')}</p>
                           </div>
 
-                          <div className="flex items-center justify-between sm:justify-end gap-3 shrink-0 pt-2 sm:pt-0 border-t sm:border-0 border-slate-200/60">
-                            <span className="font-black text-amber-600 text-base hidden sm:inline-block pr-2">MVR {item.totalDue.toFixed(0)}</span>
+                          <div className="flex items-center justify-between sm:justify-end gap-2 shrink-0 pt-2 sm:pt-0 border-t sm:border-0 border-slate-200/60">
+                            <span className="font-black text-amber-600 text-sm hidden sm:inline-block pr-2">MVR {item.totalDue.toFixed(0)}</span>
 
-                            <div className="flex items-center gap-2 w-full sm:w-auto">
+                            <div className="flex items-center gap-1.5 w-full sm:w-auto">
                               <button 
                                 onClick={async () => {
                                   const newPaidState = !item.hasPaid;
@@ -2112,17 +2095,17 @@ export default function ActivitiesPage() {
                                   await supabase.from('activity_participants').update({ has_paid: newPaidState }).eq('activity_id', currentActivity.id).eq('head_id', currentActivity.participants.find((p: Participant) => p.id === item.initialPartId)?.head_id);
                                   fetchActivitiesData();
                                 }}
-                                className={`flex-1 sm:flex-none px-3 py-1.5 rounded-lg font-black text-[10px] uppercase tracking-wider border transition-colors ${item.hasPaid ? 'bg-emerald-50 text-emerald-600 border-emerald-200' : 'bg-amber-50 text-amber-600 border-amber-200'}`}
+                                className={`flex-1 sm:flex-none px-2.5 py-1.5 rounded-lg font-black text-[9px] uppercase tracking-wider border transition-colors ${item.hasPaid ? 'bg-emerald-50 text-emerald-600 border-emerald-200' : 'bg-amber-50 text-amber-600 border-amber-200'}`}
                               >
                                 {item.hasPaid ? 'Paid ✅' : 'Mark Paid ⏳'}
                               </button>
 
                               <button 
                                 onClick={() => handleSharePersonalWhatsApp(currentActivity, item)}
-                                className={`flex-1 sm:flex-none px-3.5 py-1.5 rounded-lg font-bold text-[10px] uppercase tracking-wider transition-colors flex items-center justify-center gap-1.5 ${item.whatsappShared ? 'bg-emerald-600 text-white' : 'bg-slate-900 text-white hover:bg-slate-800'}`}
+                                className={`flex-1 sm:flex-none px-3 py-1.5 rounded-lg font-bold text-[9px] uppercase tracking-wider transition-colors flex items-center justify-center gap-1 ${item.whatsappShared ? 'bg-emerald-600 text-white' : 'bg-slate-900 text-white hover:bg-slate-800'}`}
                               >
-                                <Send size={11}/>
-                                {item.whatsappShared ? 'Shared ✅' : 'Share Bill'}
+                                <Send size={10}/>
+                                {item.whatsappShared ? 'Shared ✅' : 'WhatsApp'}
                               </button>
                             </div>
                           </div>
@@ -2135,18 +2118,18 @@ export default function ActivitiesPage() {
 
               {/* TAB 4: SHOPPING LIST */}
               {activeTab === 'shopping' && (
-                <div className="bg-white rounded-2xl border border-slate-200/80 p-3.5 sm:p-5 shadow-[0_2px_12px_rgba(0,0,0,0.02)] space-y-4">
+                <div className="bg-white rounded-2xl border border-slate-200/80 p-3 sm:p-5 shadow-[0_2px_12px_rgba(0,0,0,0.02)] space-y-3">
                   <div className="flex justify-between items-center pb-2 border-b border-slate-100">
-                    <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider"><ClipboardList size={14} className="inline mr-1 text-slate-400"/> Provision Checklist</h3>
-                    <button onClick={() => handleAddShoppingItem(currentActivity.id)} className="bg-slate-900 text-white font-bold text-[10px] uppercase px-3 py-1.5 rounded-xl transition-transform active:scale-95 flex items-center gap-1">
-                      <Plus size={12}/> Add Item
+                    <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider"><ClipboardList size={14} className="inline mr-1 text-slate-400"/> Provisions List</h3>
+                    <button onClick={() => handleAddShoppingItem(currentActivity.id)} className="bg-slate-900 text-white font-bold text-[10px] uppercase px-2.5 py-1 rounded-xl flex items-center gap-1">
+                      <Plus size={12}/> Add
                     </button>
                   </div>
 
                   {currentActivity.shopping.length === 0 ? (
-                    <p className="text-xs text-slate-400 text-center py-12 font-semibold">No provisions added to the list.</p>
+                    <p className="text-xs text-slate-400 text-center py-8 font-semibold">No provisions logged.</p>
                   ) : (
-                    <div className="space-y-2">
+                    <div className="space-y-1.5">
                       {currentActivity.shopping.map((item: ShoppingItem) => (
                         <div key={item.id} className="flex gap-2 items-center bg-slate-50 border border-slate-100 p-2 rounded-xl">
                           <button 
@@ -2154,9 +2137,9 @@ export default function ActivitiesPage() {
                               handleUpdateShopLocal(currentActivity.id, item.id, "is_bought", !item.is_bought);
                               handleSaveShopDB(item.id, "is_bought", !item.is_bought);
                             }}
-                            className="text-slate-400 hover:text-slate-900 p-0.5 shrink-0"
+                            className="text-slate-400 p-0.5 shrink-0"
                           >
-                            {item.is_bought ? <CheckCircle2 size={18} className="text-emerald-500"/> : <div className="w-4 h-4 rounded-md border border-slate-300 bg-white"/>}
+                            {item.is_bought ? <CheckCircle2 size={16} className="text-emerald-500"/> : <div className="w-3.5 h-3.5 rounded border border-slate-300 bg-white"/>}
                           </button>
 
                           <input 
@@ -2174,10 +2157,10 @@ export default function ActivitiesPage() {
                             value={item.qty} 
                             onChange={(e) => handleUpdateShopLocal(currentActivity.id, item.id, "qty", e.target.value)} 
                             onBlur={(e) => handleSaveShopDB(item.id, "qty", e.target.value)} 
-                            className="w-14 bg-white border border-slate-200 p-1 rounded-lg text-xs font-bold text-center focus:outline-none text-slate-600 shrink-0"
+                            className="w-12 bg-white border border-slate-200 p-1 rounded-lg text-xs font-bold text-center focus:outline-none text-slate-600 shrink-0"
                           />
 
-                          <button onClick={() => handleRemoveShopItem(item.id)} className="text-slate-300 hover:text-rose-500 p-1 shrink-0"><X size={15}/></button>
+                          <button onClick={() => handleRemoveShopItem(item.id)} className="text-slate-300 hover:text-rose-500 p-0.5 shrink-0"><X size={14}/></button>
                         </div>
                       ))}
                     </div>
