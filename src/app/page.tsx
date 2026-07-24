@@ -5,7 +5,7 @@ import { supabase } from '@/lib/supabase'
 import AddTransaction from '@/components/AddTransaction'
 import { 
   Wallet, TrendingDown, TrendingUp, 
-  Settings, ShoppingCart, Calculator, Activity, Banknote, User2, ArrowUpRight, ArrowDownRight, LayoutDashboard, Flame
+  Settings, ShoppingCart, Calculator, Activity, Banknote, User2, ArrowUpRight, ArrowDownRight, LayoutDashboard, Flame, Gamepad2
 } from "lucide-react"
 import Link from 'next/link'
 
@@ -130,6 +130,7 @@ export default function Home() {
           <Link href="/splitter" className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium hover:bg-slate-50 text-slate-500 hover:text-slate-900 transition-all duration-150"><Calculator size={18}/> Splitter</Link>
           <Link href="/shop-clearing" className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium hover:bg-slate-50 text-slate-500 hover:text-slate-900 transition-all duration-150"><ShoppingCart size={18}/> Clearing</Link>
           <Link href="/activities" className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium hover:bg-slate-50 text-slate-500 hover:text-slate-900 transition-all duration-150"><Flame size={18}/> Activities</Link>
+          <Link href="/gaming" className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium hover:bg-slate-50 text-slate-500 hover:text-slate-900 transition-all duration-150"><Gamepad2 size={18}/> Gaming Hub</Link>
           <Link href="/myself" className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium hover:bg-slate-50 text-slate-500 hover:text-slate-900 transition-all duration-150"><User2 size={18}/> Myself</Link>
         </nav>
         
@@ -228,6 +229,7 @@ export default function Home() {
           <Link href="/splitter" className="text-slate-400 hover:text-slate-800 transition-colors active:scale-95"><Calculator size={18} /></Link>
           <Link href="/shop-clearing" className="text-slate-400 hover:text-slate-800 transition-colors active:scale-95"><ShoppingCart size={18} /></Link>
           <Link href="/activities" className="text-slate-400 hover:text-slate-800 transition-colors active:scale-95"><Flame size={18} /></Link>
+          <Link href="/gaming" className="text-slate-400 hover:text-slate-800 transition-colors active:scale-95"><Gamepad2 size={18} /></Link>
           <Link href="/myself" className="text-slate-400 hover:text-slate-800 transition-colors active:scale-95"><User2 size={18} /></Link>
         </nav>
       </div>
