@@ -281,7 +281,6 @@ export default function SplitterPage() {
     }, 1500);
   };
 
-  // --- STRICT ID-BASED STATE UPDATERS ---
   const createNewEvent = () => {
     const newId = generateId();
     const today = new Date().toISOString().split('T')[0];
@@ -303,7 +302,6 @@ export default function SplitterPage() {
 
   const updateEvent = (eventId: string, field: string, value: any) => { setEvents(prev => prev.map(e => e.id === eventId ? { ...e, [field]: value } : e)); };
   
-  // --- INVOICE MASTER LOGIC ---
   const addInvoiceItem = (eventId: string) => {
     setEvents(prev => prev.map(e => e.id === eventId ? { ...e, invoiceItems: [...(e.invoiceItems || []), { id: generateId(), desc: "", qty: 1, price: "" }] } : e));
   };
@@ -371,7 +369,7 @@ export default function SplitterPage() {
     }
     const timer = setTimeout(() => {
       setLockedOrderKeys([]);
-    }, 5000); // Locks sorting layout index positions for 5 full seconds before allowing jumps
+    }, 5000);
     setSortingLockTimer(timer);
   };
 
@@ -415,13 +413,11 @@ export default function SplitterPage() {
     }
   };
 
-  // --- BATCH CONFIRM FULL RECOVERY PAY ---
   const markPersonFullyPaid = async (person: any, currentPendingList: any[]) => {
     if (!confirm(`Mark all ${person.details.length} events for ${person.name} as fully paid?`)) return;
     
     lockSortingTemporarily(currentPendingList);
     
-    // Create localized mutations map
     const eventsToUpdateMap: Record<string, any> = {};
     
     person.details.forEach((d: any) => {
@@ -436,7 +432,6 @@ export default function SplitterPage() {
       }
     });
 
-    // Run parallel mutations pipeline across local state + database streams
     try {
       await Promise.all(
         Object.values(eventsToUpdateMap).map(async (ev: any) => {
@@ -463,7 +458,6 @@ export default function SplitterPage() {
         })
       );
 
-      // Mutate UI locally upon successful database confirmation responses
       setEvents(prev => prev.map(e => {
         if (eventsToUpdateMap[e.id]) {
           const target = eventsToUpdateMap[e.id];
@@ -485,7 +479,6 @@ export default function SplitterPage() {
     }
   };
 
-  // --- FIX: DATABASE-BACKED ADJUSTMENTS ---
   const addAdjustment = async (personName: string) => {
     const key = personName.trim().toLowerCase();
     const newAdj = { id: generateId(), person_name: key, type: 'payment', desc_text: "", amount: 0 }; 
@@ -512,7 +505,6 @@ export default function SplitterPage() {
     if (error) showToast("Failed to delete", "error");
   };
 
-  // --- REBUILT MATH ENGINE ---
   const calculateShare = (event: any, participant: any) => {
     let subtotal = 0;
     subtotal += (participant.items || []).reduce((sum: number, item: any) => sum + ((parseFloat(item.price) || 0) * (parseFloat(item.qty) || 1)), 0);
@@ -588,7 +580,6 @@ export default function SplitterPage() {
     }
   };
 
-  // --- LIVE INVOICE AGGREGATION ---
   const getPendingByPerson = () => {
     const personMap: Record<string, any> = {};
 
@@ -599,7 +590,6 @@ export default function SplitterPage() {
       ev.participants.forEach((p: any) => {
         const key = p.name?.trim().toLowerCase();
         
-        // --- EXCLUDE YAMIN ---
         if (key === 'yamin' || key === 'abdulla yamin') return; 
 
         if (!p.hasPaid && key) {
@@ -639,7 +629,6 @@ export default function SplitterPage() {
 
     const standardSortList = Object.values(personMap);
 
-    // If an interaction lock array is active, use that specific layout key map position
     if (lockedOrderKeys.length > 0) {
       return standardSortList.sort((a, b) => {
         const indexA = lockedOrderKeys.indexOf(a.name.trim().toLowerCase());
@@ -716,7 +705,6 @@ export default function SplitterPage() {
     });
   };
 
-  // --- GLOBAL TOTALS ENGINE ---
   let globalTotalOwed = 0;
   let globalTotalCollected = 0;
 
@@ -747,7 +735,7 @@ export default function SplitterPage() {
   const pendingPeople = getPendingByPerson();
 
   return (
-    <main className="min-h-screen bg-[#F8FAFC] text-[#1E293B] font-sans antialiased flex selection:bg-sky-500/10">
+    <div className="w-full max-w-[1140px] mx-auto px-3 sm:px-6 lg:px-8 py-4 lg:py-8 pb-28">
 
       {toast && (
         <div className={`fixed top-6 right-1/2 translate-x-1/2 lg:translate-x-0 lg:right-6 z-[400] px-5 py-3.5 rounded-xl shadow-xl flex items-center gap-3 text-xs font-bold animate-in fade-in slide-in-from-top-4 duration-200 bg-slate-950 text-white`}>
@@ -756,462 +744,428 @@ export default function SplitterPage() {
         </div>
       )}
 
-      {/* PREMIUM SIDEBAR FOR PC DOCK */}
-      <aside className="hidden lg:flex w-72 bg-white border-r border-slate-200/80 flex-col p-6 sticky top-0 h-screen shrink-0 z-40">
-        <div className="flex items-center gap-3 mb-10 px-2">
-          <div className="w-9 h-9 rounded-xl bg-slate-900 flex items-center justify-center text-white font-black shadow-md">L</div>
-          <div>
-            <h1 className="text-base font-bold tracking-tight text-slate-900 leading-none">Lextrack</h1>
-            <p className="text-[9px] font-bold uppercase tracking-[0.12em] text-slate-400 mt-1">LexCorp System</p>
-          </div>
+      <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
+        <div>
+          <h2 className="text-xl lg:text-2xl font-bold tracking-tight text-slate-900">Split Ledger</h2>
+          <p className="text-xs font-medium text-slate-400 mt-0.5">Universal Group Bill Splitter</p>
         </div>
-        <nav className="space-y-1 flex-grow">
-          <Link href="/" className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium hover:bg-slate-50 text-slate-500 hover:text-slate-900 transition-all duration-150"><LayoutDashboard size={18}/> Dashboard</Link>
-          <Link href="/tracker" className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium hover:bg-slate-50 text-slate-500 hover:text-slate-900 transition-all duration-150"><Banknote size={18}/> Tracker</Link>
-          <Link href="/splitter" className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold bg-slate-900 text-white shadow-sm transition-all duration-200"><Calculator size={18}/> Splitter</Link>
-          <Link href="/shop-clearing" className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium hover:bg-slate-50 text-slate-500 hover:text-slate-900 transition-all duration-150"><ShoppingCart size={18}/> Clearing</Link>
-          <Link href="/myself" className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium hover:bg-slate-50 text-slate-500 hover:text-slate-900 transition-all duration-150"><User size={18}/> Myself</Link>
-        </nav>
-        <button className="flex items-center gap-3 px-4 py-3 text-sm font-medium text-slate-400 hover:text-slate-600 transition-colors duration-150"><Settings size={18}/> Settings</button>
-      </aside>
+        <div className="flex gap-2 w-full sm:w-auto">
+          <button onClick={() => setShowDirModal(true)} className="flex-1 sm:flex-none h-10 px-4 rounded-xl bg-white border border-slate-200/60 text-slate-700 font-semibold text-xs uppercase tracking-wider shadow-sm flex items-center justify-center gap-2 hover:bg-slate-50 active:scale-95 transition-all">
+            <Users size={14}/> Directory
+          </button>
+          <button onClick={() => setShowBankModal(true)} className="flex-1 sm:flex-none h-10 px-4 rounded-xl bg-white border border-slate-200/60 text-slate-700 font-semibold text-xs uppercase tracking-wider shadow-sm flex items-center justify-center gap-2 hover:bg-slate-50 active:scale-95 transition-all">
+            <Landmark size={14}/> MVR Bank
+          </button>
+          <button onClick={createNewEvent} className="flex-1 sm:flex-none h-10 px-5 rounded-xl bg-slate-900 text-white font-semibold text-xs uppercase tracking-wider shadow-sm flex items-center justify-center gap-2 active:scale-95 transition-all">
+            <Plus size={14}/> New Split
+          </button>
+        </div>
+      </header>
 
-      {/* CORE FRAME CONTAINER */}
-      <div className="flex-grow flex flex-col min-h-screen overflow-y-auto bg-[#F8FAFC]">
-        <div className="w-full max-w-[1140px] mx-auto px-4 lg:px-8 py-6 lg:py-8 pb-40">
-          
-          <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
-            <div>
-              <h2 className="text-xl lg:text-2xl font-bold tracking-tight text-slate-900">Split Ledger</h2>
-              <p className="text-xs font-medium text-slate-400 mt-0.5">Universal Group Bill Splitter</p>
-            </div>
-            <div className="flex gap-2 w-full sm:w-auto">
-              <button onClick={() => setShowDirModal(true)} className="flex-1 sm:flex-none h-10 px-4 rounded-xl bg-white border border-slate-200/60 text-slate-700 font-semibold text-xs uppercase tracking-wider shadow-sm flex items-center justify-center gap-2 hover:bg-slate-50 active:scale-95 transition-all">
-                <Users size={14}/> Directory
-              </button>
-              <button onClick={() => setShowBankModal(true)} className="flex-1 sm:flex-none h-10 px-4 rounded-xl bg-white border border-slate-200/60 text-slate-700 font-semibold text-xs uppercase tracking-wider shadow-sm flex items-center justify-center gap-2 hover:bg-slate-50 active:scale-95 transition-all">
-                <Landmark size={14}/> MVR Bank
-              </button>
-              <button onClick={createNewEvent} className="flex-1 sm:flex-none h-10 px-5 rounded-xl bg-slate-900 text-white font-semibold text-xs uppercase tracking-wider shadow-sm flex items-center justify-center gap-2 active:scale-95 transition-all">
-                <Plus size={14}/> New Split
-              </button>
-            </div>
-          </header>
+      {/* TOTAL CARD SUMMARIES */}
+      <div className="grid grid-cols-2 gap-3 sm:gap-5 mb-8">
+        <div className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200/60 shadow-[0_2px_12px_rgba(0,0,0,0.02)]">
+          <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5 flex items-center gap-1.5"><ArrowDownRight size={14} className="text-amber-500"/> Total Pending Owed</p>
+          <p className="text-xl sm:text-2xl font-extrabold text-amber-600 truncate">MVR {globalTotalOwed.toLocaleString(undefined, {maximumFractionDigits:0})}</p>
+        </div>
+        <div className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200/60 shadow-[0_2px_12px_rgba(0,0,0,0.02)]">
+          <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5 flex items-center gap-1.5"><ArrowUpRight size={14} className="text-emerald-500"/> Total Collected</p>
+          <p className="text-xl sm:text-2xl font-extrabold text-emerald-600 truncate">MVR {globalTotalCollected.toLocaleString(undefined, {maximumFractionDigits:0})}</p>
+        </div>
+      </div>
 
-          {/* TOTAL CARD SUMMARIES */}
-          <div className="grid grid-cols-2 gap-5 mb-8">
-            <div className="bg-white rounded-2xl p-5 border border-slate-200/60 shadow-[0_2px_12px_rgba(0,0,0,0.02)]">
-              <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2 flex items-center gap-1.5"><ArrowDownRight size={14} className="text-amber-500"/> Total Pending Owed</p>
-              <p className="text-2xl font-extrabold text-amber-600">MVR {globalTotalOwed.toLocaleString(undefined, {maximumFractionDigits:0})}</p>
-            </div>
-            <div className="bg-white rounded-2xl p-5 border border-slate-200/60 shadow-[0_2px_12px_rgba(0,0,0,0.02)]">
-              <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2 flex items-center gap-1.5"><ArrowUpRight size={14} className="text-emerald-500"/> Total Collected</p>
-              <p className="text-2xl font-extrabold text-emerald-600">MVR {globalTotalCollected.toLocaleString(undefined, {maximumFractionDigits:0})}</p>
-            </div>
-          </div>
-
-          {/* CONSOLIDATED PENDING PEOPLE */}
-          {pendingPeople.length > 0 && (
-            <div className="mb-10">
-              <h3 className="text-xs font-bold uppercase tracking-[0.12em] text-slate-400 mb-4 pl-1">Pending By Person</h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-                {pendingPeople.map((person, idx) => {
-                  const personKey = person.name.trim().toLowerCase();
-                  
-                  const personAdjs = safeAdjustments.filter(a => a.person_name === personKey);
-                  const chargeTotal = personAdjs.filter(a => a.type === 'charge').reduce((s, a) => s + (parseFloat(a.amount) || 0), 0);
-                  const paymentTotal = personAdjs.filter(a => a.type === 'payment').reduce((s, a) => s + (parseFloat(a.amount) || 0), 0);
-                  
-                  const finalTotal = person.totalOwed + chargeTotal - paymentTotal;
-                  const isShared = sharedStatuses[personKey] === finalTotal;
-
-                  return (
-                    <div key={idx} className="bg-white p-5 rounded-2xl border border-slate-200/60 shadow-[0_2px_12px_rgba(0,0,0,0.02)] flex flex-col justify-between transition-all duration-200 hover:shadow-md">
-                      <div className="flex justify-between items-start mb-3">
-                        <div>
-                          <div className="flex items-center gap-2 mb-0.5">
-                            <User size={15} className="text-slate-400"/>
-                            <h4 className="font-bold text-slate-900 text-base max-w-[130px] truncate">{person.name}</h4>
-                          </div>
-                          <p className="text-[10px] font-bold text-amber-600 uppercase tracking-wider">{person.details.length} pending event(s)</p>
-                        </div>
-                        <div className="text-right">
-                          <p className="text-[9px] font-bold uppercase text-slate-400">Total Due</p>
-                          <p className="font-extrabold text-amber-600 text-base">MVR {finalTotal.toFixed(0)}</p>
-                        </div>
-                      </div>
-
-                      <div className="flex justify-between items-center mb-4">
-                        <button onClick={() => setExpandedPerson(expandedPerson === personKey ? null : personKey)} className="text-[10px] font-bold text-sky-600 flex items-center gap-0.5 uppercase tracking-wider">
-                          {expandedPerson === personKey ? <ChevronUp size={12}/> : <ChevronDown size={12}/>}
-                          {expandedPerson === personKey ? "Hide Details" : "View Details"}
-                        </button>
-
-                        <button 
-                          onClick={() => markPersonFullyPaid(person, pendingPeople)}
-                          className="text-[10px] font-bold bg-emerald-50 text-emerald-600 border border-emerald-100 px-2 py-1 rounded-lg hover:bg-emerald-100 flex items-center gap-1 transition-colors"
-                        >
-                          <CheckSquare size={12}/> Settle All
-                        </button>
-                      </div>
-
-                      {expandedPerson === personKey && (
-                        <div className="mb-4 bg-slate-50/70 p-3 rounded-xl border border-slate-100 space-y-2.5 max-h-48 overflow-y-auto">
-                          {person.details.map((d: any, dIdx: number) => (
-                            <div key={dIdx} className="flex justify-between items-center border-b border-slate-100 pb-2 last:border-0 last:pb-0">
-                              <div className="max-w-[120px]">
-                                <p className="font-semibold text-xs text-slate-800 uppercase truncate">{d.title}</p>
-                                <p className="text-[9px] text-slate-400 font-bold">{d.date}</p>
-                              </div>
-                              <div className="flex items-center gap-2">
-                                <span className="font-bold text-amber-600 text-xs">MVR {d.share.toFixed(0)}</span>
-                                <button 
-                                  onClick={() => markAsPaidFromTile(d.eventId, d.participantId, pendingPeople)}
-                                  className="bg-white border border-slate-200 text-slate-700 px-2 py-1 rounded-md font-bold text-[9px] uppercase tracking-wider hover:bg-slate-50 active:scale-95 transition-transform"
-                                >
-                                  Pay
-                                </button>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-
-                      <div className="mb-4 bg-slate-50/50 p-3 rounded-xl border border-slate-100">
-                        <div className="flex justify-between items-center mb-2">
-                          <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400">Adjustments</span>
-                          <button onClick={() => addAdjustment(person.name)} className="text-sky-600 flex items-center gap-0.5 text-[9px] font-bold uppercase tracking-wider active:scale-95 transition-transform"><Plus size={10}/> Add</button>
-                        </div>
-                        <div className="space-y-2">
-                          {personAdjs.map(adj => (
-                            <div key={adj.id} className="flex gap-1 items-center animate-in fade-in">
-                              <select 
-                                value={adj.type} 
-                                onChange={e => {
-                                  updateAdjustmentLocal(adj.id, 'type', e.target.value);
-                                  saveAdjustmentDB(adj.id, 'type', e.target.value);
-                                }} 
-                                className={`w-20 border border-slate-200 rounded-lg p-1.5 text-[9px] font-bold uppercase tracking-wider focus:outline-none ${adj.type === 'payment' ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600'}`}
-                              >
-                                <option value="charge">+ Debt</option>
-                                <option value="payment">- Recv</option>
-                              </select>
-                              <input 
-                                placeholder={adj.type === 'payment' ? "Bank Trf" : "Old Debt"} 
-                                value={adj.desc_text || ''} 
-                                onChange={e => updateAdjustmentLocal(adj.id, 'desc_text', e.target.value)} 
-                                onBlur={e => saveAdjustmentDB(adj.id, 'desc_text', e.target.value)}
-                                className="flex-grow min-w-[50px] bg-white border border-slate-200 rounded-lg p-1 text-xs font-semibold focus:outline-none" 
-                              />
-                              <input 
-                                placeholder="MVR" 
-                                type="number" 
-                                value={adj.amount} 
-                                onChange={e => updateAdjustmentLocal(adj.id, 'amount', e.target.value)} 
-                                onBlur={e => saveAdjustmentDB(adj.id, 'amount', e.target.value)}
-                                className="w-14 bg-white border border-slate-200 rounded-lg p-1 text-xs font-semibold text-center focus:outline-none" 
-                              />
-                              <button onClick={() => removeAdjustmentDB(adj.id)} className="text-slate-300 hover:text-rose-500"><Trash2 size={13}/></button>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-
-                      <button 
-                        onClick={() => sendPersonalInvoice(person, personAdjs, finalTotal)} 
-                        className={`w-full py-2.5 rounded-xl font-bold text-[10px] uppercase tracking-wider transition-all flex justify-center items-center gap-1.5 ${isShared ? 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100' : 'bg-sky-50 text-sky-600 hover:bg-sky-100'}`}
-                      >
-                        {isShared ? <><CheckCircle2 size={13}/> Shared ✅</> : <><Send size={13}/> Send WA Invoice</>}
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
-          <h3 className="text-xs font-bold uppercase tracking-[0.12em] text-slate-400 mb-4 pl-1">Events Ledger</h3>
-          
-          <div className="space-y-4">
-            {events.length === 0 && (
-              <div className="text-center py-20 bg-white rounded-2xl border border-dashed border-slate-200 shadow-[0_2px_12px_rgba(0,0,0,0.02)]">
-                <Calculator size={44} className="mx-auto text-slate-300 mb-3" />
-                <p className="font-semibold text-slate-400 text-sm">No splits recorded yet.</p>
-              </div>
-            )}
-
-            {events.map((ev) => {
-              const isExpanded = expanded[ev.id];
-              const eventTotal = ev.participants.reduce((s: number, p: any) => s + calculateShare(ev, p), 0);
-              const collected = ev.participants.filter((p:any) => p.hasPaid).reduce((s: number, p: any) => s + calculateShare(ev, p), 0);
-              const isFullyPaid = collected >= eventTotal && eventTotal > 0;
-
-              const masterSubtotal = (ev.invoiceItems || []).reduce((sum: number, inv: any) => sum + ((parseFloat(inv.qty)||0) * (parseFloat(inv.price)||0)), 0);
-              const masterGST = masterSubtotal * ((parseFloat(ev.gst)||0)/100);
-              const masterDisc = parseFloat(ev.discount) || 0;
-              const masterGrandTotal = masterSubtotal + masterGST - masterDisc;
+      {/* CONSOLIDATED PENDING PEOPLE */}
+      {pendingPeople.length > 0 && (
+        <div className="mb-10">
+          <h3 className="text-xs font-bold uppercase tracking-[0.12em] text-slate-400 mb-4 pl-1">Pending By Person</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 lg:gap-5">
+            {pendingPeople.map((person, idx) => {
+              const personKey = person.name.trim().toLowerCase();
+              
+              const personAdjs = safeAdjustments.filter(a => a.person_name === personKey);
+              const chargeTotal = personAdjs.filter(a => a.type === 'charge').reduce((s, a) => s + (parseFloat(a.amount) || 0), 0);
+              const paymentTotal = personAdjs.filter(a => a.type === 'payment').reduce((s, a) => s + (parseFloat(a.amount) || 0), 0);
+              
+              const finalTotal = person.totalOwed + chargeTotal - paymentTotal;
+              const isShared = sharedStatuses[personKey] === finalTotal;
 
               return (
-                <div key={ev.id} className={`bg-white rounded-2xl border border-slate-200/60 shadow-[0_2px_12px_rgba(0,0,0,0.02)] transition-all duration-200 ${isExpanded ? 'ring-1 ring-slate-900 shadow-md' : ''}`}>
-                  
-                  <div className="p-4 flex items-center justify-between cursor-pointer select-none" onClick={() => setExpanded(prev => ({...prev, [ev.id]: !isExpanded}))}>
-                    <div className="flex items-center gap-4.5">
-                      <div className="w-11 h-11 rounded-xl flex items-center justify-center border border-slate-100 shadow-sm bg-slate-50 text-slate-800">
-                        <Calculator size={18}/>
+                <div key={idx} className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200/60 shadow-[0_2px_12px_rgba(0,0,0,0.02)] flex flex-col justify-between transition-all duration-200 hover:shadow-md">
+                  <div className="flex justify-between items-start mb-3">
+                    <div>
+                      <div className="flex items-center gap-2 mb-0.5">
+                        <User size={15} className="text-slate-400"/>
+                        <h4 className="font-bold text-slate-900 text-base max-w-[130px] truncate">{person.name}</h4>
                       </div>
-                      <div>
-                        <h3 className="font-bold text-base text-slate-950">{ev.title}</h3>
-                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{ev.date} • {ev.participants.length} People</p>
-                      </div>
+                      <p className="text-[10px] font-bold text-amber-600 uppercase tracking-wider">{person.details.length} pending event(s)</p>
                     </div>
-                    
-                    <div className="flex items-center gap-6">
-                      <div className="hidden sm:block text-right">
-                        <p className="text-[10px] font-bold uppercase text-slate-400">Total / Collected</p>
-                        <p className={`font-extrabold text-sm ${isFullyPaid ? 'text-emerald-600' : 'text-slate-800'}`}>
-                          {collected.toFixed(0)} / {eventTotal.toFixed(0)}
-                        </p>
-                      </div>
-                      <div className="text-slate-400">
-                        {isExpanded ? <ChevronUp size={20}/> : <ChevronDown size={20}/>}
-                      </div>
+                    <div className="text-right">
+                      <p className="text-[9px] font-bold uppercase text-slate-400">Total Due</p>
+                      <p className="font-extrabold text-amber-600 text-base">MVR {finalTotal.toFixed(0)}</p>
                     </div>
                   </div>
 
-                  {isExpanded && (
-                    <div className="p-5 border-t border-slate-100 bg-slate-50/50 rounded-b-2xl">
-                      
-                      {/* MASTER INVOICE CONTAINER */}
-                      <div className="bg-white rounded-xl border border-slate-200/60 overflow-hidden mb-6 shadow-sm">
-                        <div className="flex justify-between items-center p-3.5 border-b border-slate-100 bg-slate-50">
+                  <div className="flex justify-between items-center mb-4">
+                    <button onClick={() => setExpandedPerson(expandedPerson === personKey ? null : personKey)} className="text-[10px] font-bold text-sky-600 flex items-center gap-0.5 uppercase tracking-wider">
+                      {expandedPerson === personKey ? <ChevronUp size={12}/> : <ChevronDown size={12}/>}
+                      {expandedPerson === personKey ? "Hide Details" : "View Details"}
+                    </button>
+
+                    <button 
+                      onClick={() => markPersonFullyPaid(person, pendingPeople)}
+                      className="text-[10px] font-bold bg-emerald-50 text-emerald-600 border border-emerald-100 px-2 py-1 rounded-lg hover:bg-emerald-100 flex items-center gap-1 transition-colors"
+                    >
+                      <CheckSquare size={12}/> Settle All
+                    </button>
+                  </div>
+
+                  {expandedPerson === personKey && (
+                    <div className="mb-4 bg-slate-50/70 p-3 rounded-xl border border-slate-100 space-y-2.5 max-h-48 overflow-y-auto">
+                      {person.details.map((d: any, dIdx: number) => (
+                        <div key={dIdx} className="flex justify-between items-center border-b border-slate-100 pb-2 last:border-0 last:pb-0">
+                          <div className="max-w-[120px]">
+                            <p className="font-semibold text-xs text-slate-800 uppercase truncate">{d.title}</p>
+                            <p className="text-[9px] text-slate-400 font-bold">{d.date}</p>
+                          </div>
                           <div className="flex items-center gap-2">
-                            <Package size={15} className="text-slate-700"/>
-                            <h4 className="text-[10px] font-bold uppercase text-slate-700 tracking-wider">Master Invoice</h4>
-                            <span className="ml-2 text-[9px] font-bold text-slate-800 bg-white px-2 py-0.5 rounded border border-slate-200 shadow-2xl">Grand Total: {masterGrandTotal.toFixed(2)} MVR</span>
-                          </div>
-                          <button onClick={() => addInvoiceItem(ev.id)} className="text-slate-700 font-bold text-[9px] uppercase flex items-center gap-0.5 bg-white px-2.5 py-1.5 rounded-lg border border-slate-200 active:scale-95 transition-transform shadow-2xl">
-                            <Plus size={11}/> Add Master Item
-                          </button>
-                        </div>
-                        
-                        <div className="p-4 space-y-3">
-                          {(ev.invoiceItems || []).map((inv: any) => (
-                            <div key={inv.id} className="flex gap-2 items-center">
-                              <input type="text" placeholder="Item Name (e.g. Adult Jersey)" value={inv.desc} onChange={e => updateInvoiceItem(ev.id, inv.id, 'desc', e.target.value)} className="flex-grow bg-slate-50 border border-slate-100 p-2 rounded-xl text-xs font-semibold focus:outline-none"/>
-                              <input type="number" placeholder="Qty" value={inv.qty} onChange={e => updateInvoiceItem(ev.id, inv.id, 'qty', e.target.value)} className="w-16 bg-slate-50 border border-slate-100 p-2 rounded-xl text-xs font-semibold text-center focus:outline-none"/>
-                              <input type="number" placeholder="Price/ea" value={inv.price} onChange={e => updateInvoiceItem(ev.id, inv.id, 'price', e.target.value)} className="w-24 bg-slate-50 border border-slate-100 p-2 rounded-xl text-xs font-semibold focus:outline-none"/>
-                              <button onClick={() => removeInvoiceItem(ev.id, inv.id)} className="text-slate-300 hover:text-rose-500 p-1"><Trash2 size={15}/></button>
-                            </div>
-                          ))}
-
-                          <div className="flex flex-wrap sm:flex-nowrap gap-4 border-t border-slate-100 pt-4 mt-2">
-                            <div className="flex flex-col w-full sm:w-1/3">
-                              <label className="text-[9px] font-bold uppercase tracking-wider text-slate-400 mb-1 pl-0.5">GST (%)</label>
-                              <input type="number" value={ev.gst} onChange={e => updateEvent(ev.id, 'gst', e.target.value)} className="bg-slate-50 border border-slate-100 p-2 rounded-xl text-xs font-semibold focus:outline-none" placeholder="0"/>
-                            </div>
-                            <div className="flex flex-col w-full sm:w-1/3">
-                              <label className="text-[9px] font-bold uppercase tracking-wider text-slate-400 mb-1 pl-0.5">Discount (MVR)</label>
-                              <input type="number" value={ev.discount} onChange={e => updateEvent(ev.id, 'discount', e.target.value)} className="bg-slate-50 border border-slate-100 p-2 rounded-xl text-xs font-semibold focus:outline-none" placeholder="0"/>
-                            </div>
-                            <div className="flex flex-col w-full sm:w-1/3 justify-end">
-                              <button onClick={() => moveUnclaimedToShared(ev.id)} className="w-full h-9 bg-sky-50 text-sky-600 border border-sky-100 rounded-xl font-bold text-[9px] uppercase tracking-wider shadow-sm hover:bg-sky-100 active:scale-95 transition-transform flex items-center justify-center gap-1">
-                                <Calculator size={12}/> Add Unclaimed to Shared
-                              </button>
-                            </div>
+                            <span className="font-bold text-amber-600 text-xs">MVR {d.share.toFixed(0)}</span>
+                            <button 
+                              onClick={() => markAsPaidFromTile(d.eventId, d.participantId, pendingPeople)}
+                              className="bg-white border border-slate-200 text-slate-700 px-2 py-1 rounded-md font-bold text-[9px] uppercase tracking-wider hover:bg-slate-50 active:scale-95 transition-transform"
+                            >
+                              Pay
+                            </button>
                           </div>
                         </div>
-
-                        {/* INVENTORY CHECKER */}
-                        {(ev.invoiceItems || []).length > 0 && (
-                          <div className="bg-amber-50/30 p-4 border-t border-amber-100/50">
-                            <h5 className="text-[9px] font-bold uppercase tracking-wider text-amber-600 mb-2.5">Inventory Balance Checker</h5>
-                            <div className="space-y-2">
-                              {ev.invoiceItems.map((inv: any) => {
-                                const claimed = ev.participants.reduce((sum: number, p: any) => sum + (p.items || []).filter((i: any) => i.desc.trim().toLowerCase() === inv.desc.trim().toLowerCase()).reduce((s: number, i: any) => s + (parseFloat(i.qty) || 1), 0), 0);
-                                const remaining = (parseFloat(inv.qty) || 0) - claimed;
-                                return (
-                                  <div key={inv.id} className="flex justify-between items-center text-xs font-semibold text-slate-700 bg-white p-2.5 rounded-lg shadow-sm border border-slate-100">
-                                    <span>{inv.desc || "Unnamed Item"} (Total: {inv.qty || 0})</span>
-                                    <span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider ${remaining < 0 ? 'bg-rose-50 text-rose-600' : remaining === 0 ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600'}`}>
-                                      {remaining === 0 ? 'All Claimed ✅' : remaining < 0 ? `Over-claimed by ${Math.abs(remaining)}` : `${remaining} left`}
-                                    </span>
-                                  </div>
-                                )
-                              })}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-                        <div className="flex flex-col">
-                          <label className="text-[9px] font-bold uppercase tracking-wider text-slate-400 mb-1 pl-0.5">Event Title</label>
-                          <input type="text" value={ev.title} onChange={e => updateEvent(ev.id, 'title', e.target.value)} className="bg-white border border-slate-200 p-2.5 rounded-xl text-xs font-semibold focus:outline-none"/>
-                        </div>
-                        <div className="flex flex-col">
-                          <label className="text-[9px] font-bold uppercase tracking-wider text-slate-400 mb-1 pl-0.5">Date</label>
-                          <input type="date" value={ev.date} onChange={e => updateEvent(ev.id, 'date', e.target.value)} className="bg-white border border-slate-200 p-2.5 rounded-xl text-xs font-semibold focus:outline-none"/>
-                        </div>
-                        <div className="flex gap-2">
-                          <div className="flex flex-col w-1/2">
-                            <label className="text-[9px] font-bold uppercase tracking-wider text-sky-600 mb-1 pl-0.5">Shared Items</label>
-                            <input type="number" value={ev.totalBill} onChange={e => updateEvent(ev.id, 'totalBill', e.target.value)} className="bg-white border border-slate-200 p-2.5 rounded-xl text-xs font-semibold focus:outline-none text-sky-600" placeholder="0"/>
-                          </div>
-                          <div className="flex flex-col w-1/2">
-                            <label className="text-[9px] font-bold uppercase tracking-wider text-amber-600 mb-1 pl-0.5">Delivery/Fees</label>
-                            <input type="number" value={ev.delivery} onChange={e => updateEvent(ev.id, 'delivery', e.target.value)} className="bg-white border border-slate-200 p-2.5 rounded-xl text-xs font-semibold focus:outline-none text-amber-600" placeholder="0"/>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* PARTICIPANT ENTRY CARDS */}
-                      <div className="bg-white rounded-xl border border-slate-200/60 overflow-hidden mb-6">
-                        <div className="flex justify-between items-center p-3.5 border-b border-slate-100 bg-slate-50">
-                          <h4 className="text-[10px] font-bold uppercase text-slate-700 tracking-wider">Participants</h4>
-                          <button onClick={() => addParticipant(ev.id)} className="text-sky-600 bg-sky-50 font-bold text-[9px] uppercase flex items-center gap-0.5 px-2.5 py-1.5 rounded-lg border border-sky-100 active:scale-95 transition-transform">
-                            <Plus size={11}/> Add Person
-                          </button>
-                        </div>
-                        
-                        <div className="divide-y divide-slate-100">
-                          {ev.participants.map((p: any) => {
-                            const share = calculateShare(ev, p);
-                            return (
-                              <div key={p.id} className="p-4 flex flex-col gap-3">
-                                <div className="flex flex-wrap sm:flex-nowrap items-center gap-2">
-                                  <div className="w-6 h-6 rounded-full bg-slate-100 flex items-center justify-center text-[10px] font-bold text-slate-400 flex-shrink-0">P</div>
-                                  
-                                  <div className="relative flex-grow min-w-[80px]">
-                                    <input 
-                                      type="text" 
-                                      placeholder="Name" 
-                                      value={p.name} 
-                                      onChange={e => {
-                                        updateParticipant(ev.id, p.id, "name", e.target.value);
-                                        setFocusedParticipantId(p.id);
-                                      }} 
-                                      onFocus={() => setFocusedParticipantId(p.id)}
-                                      onBlur={() => setTimeout(() => setFocusedParticipantId(null), 200)}
-                                      className="w-full bg-transparent border-none focus:outline-none font-bold text-sm p-0"
-                                    />
-                                    {focusedParticipantId === p.id && directory.length > 0 && (
-                                      <div className="absolute top-full left-0 mt-2 w-48 bg-white border border-slate-200 shadow-xl rounded-xl z-50 max-h-48 overflow-y-auto">
-                                        {directory.filter(user => user.name.toLowerCase().includes(p.name.toLowerCase()) || user.nickname.toLowerCase().includes(p.name.toLowerCase())).map(user => (
-                                          <div 
-                                            key={user.id} 
-                                            className="p-3 hover:bg-slate-50 cursor-pointer border-b border-slate-100 last:border-0"
-                                            onClick={() => {
-                                              updateParticipant(ev.id, p.id, "name", user.name);
-                                              setFocusedParticipantId(null);
-                                            }}
-                                          >
-                                            <p className="text-xs font-bold text-slate-800">{user.name}</p>
-                                            {user.nickname && <p className="text-[9px] text-slate-400 font-bold uppercase tracking-wider">{user.nickname}</p>}
-                                          </div>
-                                        ))}
-                                      </div>
-                                    )}
-                                  </div>
-                                  
-                                  <div className="w-20 text-right font-extrabold text-sm text-slate-800 mr-2">
-                                    <span className="text-[9px] text-slate-400 mr-0.5 font-bold">MVR</span>{share.toFixed(0)}
-                                  </div>
-
-                                  <button 
-                                    onClick={() => updateParticipant(ev.id, p.id, "hasPaid", !p.hasPaid)}
-                                    className={`px-2 py-1.5 rounded-lg text-[9px] font-bold uppercase tracking-wider transition-colors w-16 text-center ${p.hasPaid ? 'bg-emerald-50 text-emerald-600 border border-emerald-100' : 'bg-amber-50 text-amber-600 border border-amber-100 hover:bg-amber-100'}`}
-                                  >
-                                    {p.hasPaid ? 'Paid' : 'Pending'}
-                                  </button>
-                                  
-                                  <button onClick={() => removeParticipant(ev.id, p.id)} className="text-slate-300 hover:text-rose-500 p-1"><Trash2 size={15}/></button>
-                                </div>
-
-                                <div className="pl-8 flex gap-2">
-                                  <button 
-                                    onClick={() => updateParticipant(ev.id, p.id, "paysMain", p.paysMain === false ? true : false)}
-                                    className={`px-2 py-0.5 rounded-md text-[8px] font-bold uppercase tracking-wider transition-colors text-center ${p.paysMain !== false ? 'bg-sky-50 text-sky-600' : 'bg-slate-100 text-slate-400 line-through'}`}
-                                  >
-                                    {p.paysMain !== false ? 'Bill: Yes' : 'Bill: No'}
-                                  </button>
-                                  <button 
-                                    onClick={() => updateParticipant(ev.id, p.id, "paysDelivery", p.paysDelivery === false ? true : false)}
-                                    className={`px-2 py-0.5 rounded-md text-[8px] font-bold uppercase tracking-wider transition-colors text-center ${p.paysDelivery !== false ? 'bg-indigo-50 text-indigo-600' : 'bg-slate-100 text-slate-400 line-through'}`}
-                                  >
-                                    {p.paysDelivery !== false ? 'Deliv: Yes' : 'Deliv: No'}
-                                  </button>
-                                </div>
-
-                                <div className="pl-8 pr-1 space-y-2 mt-1">
-                                  {(p.items || []).map((item: any) => (
-                                    <div key={item.id} className="flex items-center gap-2">
-                                      <input 
-                                        type="text" 
-                                        placeholder="Item Name" 
-                                        maxLength={18}
-                                        list={`master-items-${ev.id}`}
-                                        value={item.desc} 
-                                        onChange={e => updateParticipantItem(ev.id, p.id, item.id, "desc", e.target.value)} 
-                                        className="flex-grow bg-slate-50 rounded-lg border border-slate-100 focus:outline-none text-xs font-semibold p-1.5" 
-                                      />
-                                      <input 
-                                        type="number" 
-                                        placeholder="Qty" 
-                                        value={item.qty} 
-                                        onChange={e => updateParticipantItem(ev.id, p.id, item.id, "qty", e.target.value)} 
-                                        className="w-12 bg-slate-50 rounded-lg border border-slate-100 focus:outline-none text-xs font-semibold p-1.5 text-center" 
-                                      />
-                                      <input 
-                                        type="number" 
-                                        placeholder="Price/ea" 
-                                        value={item.price} 
-                                        onChange={e => updateParticipantItem(ev.id, p.id, item.id, "price", e.target.value)} 
-                                        className="w-16 bg-slate-50 rounded-lg border border-slate-100 focus:outline-none text-xs font-semibold p-1.5 text-center" 
-                                      />
-                                      <button onClick={() => removeParticipantItem(ev.id, p.id, item.id)} className="text-slate-300 hover:text-rose-500 p-1"><X size={13}/></button>
-                                    </div>
-                                  ))}
-                                  
-                                  <datalist id={`master-items-${ev.id}`}>
-                                    {(ev.invoiceItems || []).map((inv: any) => (
-                                      <option key={inv.id} value={inv.desc} />
-                                    ))}
-                                  </datalist>
-
-                                  <button onClick={() => addParticipantItem(ev.id, p.id)} className="text-slate-400 font-bold text-[9px] uppercase tracking-wider flex items-center gap-0.5 mt-1 hover:text-slate-700">
-                                    <Plus size={9}/> Add Personal Item
-                                  </button>
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </div>
-
-                      <div className="flex flex-wrap sm:flex-nowrap justify-between items-center gap-4">
-                        <button onClick={() => deleteEvent(ev.id)} className="text-rose-500 text-[10px] font-bold uppercase flex items-center gap-0.5 hover:text-rose-700">
-                          <Trash2 size={13}/> Delete Event
-                        </button>
-                        <button onClick={() => saveEvent(ev.id)} className="w-full sm:w-auto h-10 px-6 rounded-xl bg-slate-900 text-white font-semibold text-xs uppercase tracking-wider shadow-sm active:scale-95 transition-all">
-                          Save Event
-                        </button>
-                      </div>
-
+                      ))}
                     </div>
                   )}
+
+                  <div className="mb-4 bg-slate-50/50 p-3 rounded-xl border border-slate-100">
+                    <div className="flex justify-between items-center mb-2">
+                      <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400">Adjustments</span>
+                      <button onClick={() => addAdjustment(person.name)} className="text-sky-600 flex items-center gap-0.5 text-[9px] font-bold uppercase tracking-wider active:scale-95 transition-transform"><Plus size={10}/> Add</button>
+                    </div>
+                    <div className="space-y-2">
+                      {personAdjs.map(adj => (
+                        <div key={adj.id} className="flex gap-1 items-center animate-in fade-in">
+                          <select 
+                            value={adj.type} 
+                            onChange={e => {
+                              updateAdjustmentLocal(adj.id, 'type', e.target.value);
+                              saveAdjustmentDB(adj.id, 'type', e.target.value);
+                            }} 
+                            className={`w-20 border border-slate-200 rounded-lg p-1.5 text-[9px] font-bold uppercase tracking-wider focus:outline-none ${adj.type === 'payment' ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600'}`}
+                          >
+                            <option value="charge">+ Debt</option>
+                            <option value="payment">- Recv</option>
+                          </select>
+                          <input 
+                            placeholder={adj.type === 'payment' ? "Bank Trf" : "Old Debt"} 
+                            value={adj.desc_text || ''} 
+                            onChange={e => updateAdjustmentLocal(adj.id, 'desc_text', e.target.value)} 
+                            onBlur={e => saveAdjustmentDB(adj.id, 'desc_text', e.target.value)}
+                            className="flex-grow min-w-[50px] bg-white border border-slate-200 rounded-lg p-1 text-xs font-semibold focus:outline-none" 
+                          />
+                          <input 
+                            placeholder="MVR" 
+                            type="number" 
+                            value={adj.amount} 
+                            onChange={e => updateAdjustmentLocal(adj.id, 'amount', e.target.value)} 
+                            onBlur={e => saveAdjustmentDB(adj.id, 'amount', e.target.value)}
+                            className="w-14 bg-white border border-slate-200 rounded-lg p-1 text-xs font-semibold text-center focus:outline-none" 
+                          />
+                          <button onClick={() => removeAdjustmentDB(adj.id)} className="text-slate-300 hover:text-rose-500"><Trash2 size={13}/></button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <button 
+                    onClick={() => sendPersonalInvoice(person, personAdjs, finalTotal)} 
+                    className={`w-full py-2.5 rounded-xl font-bold text-[10px] uppercase tracking-wider transition-all flex justify-center items-center gap-1.5 ${isShared ? 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100' : 'bg-sky-50 text-sky-600 hover:bg-sky-100'}`}
+                  >
+                    {isShared ? <><CheckCircle2 size={13}/> Shared ✅</> : <><Send size={13}/> Send WA Invoice</>}
+                  </button>
                 </div>
               );
             })}
           </div>
         </div>
+      )}
 
-        {/* 2026 LIGHT PORTABLE BOTTOM NAV FOR MOBILE HUB */}
-        <nav className="lg:hidden fixed bottom-5 left-1/2 -translate-x-1/2 w-[92%] max-w-[360px] h-14 bg-white/90 border border-slate-200/60 shadow-[0_8px_30px_rgba(0,0,0,0.06)] rounded-xl flex justify-around items-center px-2 z-[100] backdrop-blur-md">
-          <Link href="/" className="text-slate-400 hover:text-slate-800 transition-colors active:scale-95"><Wallet size={18} /></Link>
-          <Link href="/tracker" className="text-slate-400 hover:text-slate-800 transition-colors active:scale-95"><Banknote size={18} /></Link>
-          <Link href="/splitter" className="text-slate-900 transition-transform duration-200 active:scale-95"><Calculator size={18} className="bg-slate-100 p-2 w-8 h-8 rounded-lg" /></Link>
-          <Link href="/shop-clearing" className="text-slate-400 hover:text-slate-800 transition-colors active:scale-95"><ShoppingCart size={18} /></Link>
-          <Link href="/myself" className="text-slate-400 hover:text-slate-800 transition-colors active:scale-95"><User size={18} /></Link>
-        </nav>
+      <h3 className="text-xs font-bold uppercase tracking-[0.12em] text-slate-400 mb-4 pl-1">Events Ledger</h3>
+      
+      <div className="space-y-4">
+        {events.length === 0 && (
+          <div className="text-center py-20 bg-white rounded-2xl border border-dashed border-slate-200 shadow-[0_2px_12px_rgba(0,0,0,0.02)]">
+            <Calculator size={44} className="mx-auto text-slate-300 mb-3" />
+            <p className="font-semibold text-slate-400 text-sm">No splits recorded yet.</p>
+          </div>
+        )}
+
+        {events.map((ev) => {
+          const isExpanded = expanded[ev.id];
+          const eventTotal = ev.participants.reduce((s: number, p: any) => s + calculateShare(ev, p), 0);
+          const collected = ev.participants.filter((p:any) => p.hasPaid).reduce((s: number, p: any) => s + calculateShare(ev, p), 0);
+          const isFullyPaid = collected >= eventTotal && eventTotal > 0;
+
+          const masterSubtotal = (ev.invoiceItems || []).reduce((sum: number, inv: any) => sum + ((parseFloat(inv.qty)||0) * (parseFloat(inv.price)||0)), 0);
+          const masterGST = masterSubtotal * ((parseFloat(ev.gst)||0)/100);
+          const masterDisc = parseFloat(ev.discount) || 0;
+          const masterGrandTotal = masterSubtotal + masterGST - masterDisc;
+
+          return (
+            <div key={ev.id} className={`bg-white rounded-2xl border border-slate-200/60 shadow-[0_2px_12px_rgba(0,0,0,0.02)] transition-all duration-200 ${isExpanded ? 'ring-1 ring-slate-900 shadow-md' : ''}`}>
+              
+              <div className="p-4 flex items-center justify-between cursor-pointer select-none" onClick={() => setExpanded(prev => ({...prev, [ev.id]: !isExpanded}))}>
+                <div className="flex items-center gap-3.5">
+                  <div className="w-10 h-10 rounded-xl flex items-center justify-center border border-slate-100 shadow-xs bg-slate-50 text-slate-800 shrink-0">
+                    <Calculator size={18}/>
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-sm sm:text-base text-slate-950">{ev.title}</h3>
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{ev.date} • {ev.participants.length} People</p>
+                  </div>
+                </div>
+                
+                <div className="flex items-center gap-4">
+                  <div className="hidden sm:block text-right">
+                    <p className="text-[10px] font-bold uppercase text-slate-400">Total / Collected</p>
+                    <p className={`font-extrabold text-sm ${isFullyPaid ? 'text-emerald-600' : 'text-slate-800'}`}>
+                      {collected.toFixed(0)} / {eventTotal.toFixed(0)}
+                    </p>
+                  </div>
+                  <div className="text-slate-400">
+                    {isExpanded ? <ChevronUp size={20}/> : <ChevronDown size={20}/>}
+                  </div>
+                </div>
+              </div>
+
+              {isExpanded && (
+                <div className="p-4 sm:p-5 border-t border-slate-100 bg-slate-50/50 rounded-b-2xl space-y-5">
+                  
+                  {/* MASTER INVOICE CONTAINER */}
+                  <div className="bg-white rounded-xl border border-slate-200/60 overflow-hidden shadow-xs">
+                    <div className="flex justify-between items-center p-3 sm:p-3.5 border-b border-slate-100 bg-slate-50 flex-wrap gap-2">
+                      <div className="flex items-center gap-2">
+                        <Package size={15} className="text-slate-700"/>
+                        <h4 className="text-[10px] font-bold uppercase text-slate-700 tracking-wider">Master Invoice</h4>
+                        <span className="text-[9px] font-bold text-slate-800 bg-white px-2 py-0.5 rounded border border-slate-200 shadow-2xs">Total: {masterGrandTotal.toFixed(2)} MVR</span>
+                      </div>
+                      <button onClick={() => addInvoiceItem(ev.id)} className="text-slate-700 font-bold text-[9px] uppercase flex items-center gap-0.5 bg-white px-2.5 py-1.5 rounded-lg border border-slate-200 active:scale-95 transition-transform shadow-2xs">
+                        <Plus size={11}/> Add Master Item
+                      </button>
+                    </div>
+                    
+                    <div className="p-3 sm:p-4 space-y-3">
+                      {(ev.invoiceItems || []).map((inv: any) => (
+                        <div key={inv.id} className="flex gap-1.5 sm:gap-2 items-center">
+                          <input type="text" placeholder="Item Name" value={inv.desc} onChange={e => updateInvoiceItem(ev.id, inv.id, 'desc', e.target.value)} className="flex-grow min-w-0 bg-slate-50 border border-slate-100 p-2 rounded-xl text-xs font-semibold focus:outline-none"/>
+                          <input type="number" placeholder="Qty" value={inv.qty} onChange={e => updateInvoiceItem(ev.id, inv.id, 'qty', e.target.value)} className="w-12 sm:w-16 bg-slate-50 border border-slate-100 p-2 rounded-xl text-xs font-semibold text-center focus:outline-none shrink-0"/>
+                          <input type="number" placeholder="Price" value={inv.price} onChange={e => updateInvoiceItem(ev.id, inv.id, 'price', e.target.value)} className="w-20 sm:w-24 bg-slate-50 border border-slate-100 p-2 rounded-xl text-xs font-semibold focus:outline-none shrink-0"/>
+                          <button onClick={() => removeInvoiceItem(ev.id, inv.id)} className="text-slate-300 hover:text-rose-500 p-1 shrink-0"><Trash2 size={15}/></button>
+                        </div>
+                      ))}
+
+                      <div className="flex flex-wrap sm:flex-nowrap gap-3 border-t border-slate-100 pt-3 mt-2">
+                        <div className="flex flex-col w-full sm:w-1/3">
+                          <label className="text-[9px] font-bold uppercase tracking-wider text-slate-400 mb-1 pl-0.5">GST (%)</label>
+                          <input type="number" value={ev.gst} onChange={e => updateEvent(ev.id, 'gst', e.target.value)} className="bg-slate-50 border border-slate-100 p-2 rounded-xl text-xs font-semibold focus:outline-none" placeholder="0"/>
+                        </div>
+                        <div className="flex flex-col w-full sm:w-1/3">
+                          <label className="text-[9px] font-bold uppercase tracking-wider text-slate-400 mb-1 pl-0.5">Discount (MVR)</label>
+                          <input type="number" value={ev.discount} onChange={e => updateEvent(ev.id, 'discount', e.target.value)} className="bg-slate-50 border border-slate-100 p-2 rounded-xl text-xs font-semibold focus:outline-none" placeholder="0"/>
+                        </div>
+                        <div className="flex flex-col w-full sm:w-1/3 justify-end">
+                          <button onClick={() => moveUnclaimedToShared(ev.id)} className="w-full h-9 bg-sky-50 text-sky-600 border border-sky-100 rounded-xl font-bold text-[9px] uppercase tracking-wider shadow-xs hover:bg-sky-100 active:scale-95 transition-transform flex items-center justify-center gap-1">
+                            <Calculator size={12}/> Unclaimed to Shared
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* INVENTORY CHECKER */}
+                    {(ev.invoiceItems || []).length > 0 && (
+                      <div className="bg-amber-50/30 p-3 sm:p-4 border-t border-amber-100/50">
+                        <h5 className="text-[9px] font-bold uppercase tracking-wider text-amber-600 mb-2">Inventory Balance Checker</h5>
+                        <div className="space-y-1.5">
+                          {ev.invoiceItems.map((inv: any) => {
+                            const claimed = ev.participants.reduce((sum: number, p: any) => sum + (p.items || []).filter((i: any) => i.desc.trim().toLowerCase() === inv.desc.trim().toLowerCase()).reduce((s: number, i: any) => s + (parseFloat(i.qty) || 1), 0), 0);
+                            const remaining = (parseFloat(inv.qty) || 0) - claimed;
+                            return (
+                              <div key={inv.id} className="flex justify-between items-center text-xs font-semibold text-slate-700 bg-white p-2 rounded-lg shadow-2xs border border-slate-100">
+                                <span>{inv.desc || "Unnamed Item"} (Total: {inv.qty || 0})</span>
+                                <span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider ${remaining < 0 ? 'bg-rose-50 text-rose-600' : remaining === 0 ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600'}`}>
+                                  {remaining === 0 ? 'All Claimed ✅' : remaining < 0 ? `Over-claimed by ${Math.abs(remaining)}` : `${remaining} left`}
+                                </span>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div className="flex flex-col">
+                      <label className="text-[9px] font-bold uppercase tracking-wider text-slate-400 mb-1 pl-0.5">Event Title</label>
+                      <input type="text" value={ev.title} onChange={e => updateEvent(ev.id, 'title', e.target.value)} className="bg-white border border-slate-200 p-2.5 rounded-xl text-xs font-semibold focus:outline-none"/>
+                    </div>
+                    <div className="flex flex-col">
+                      <label className="text-[9px] font-bold uppercase tracking-wider text-slate-400 mb-1 pl-0.5">Date</label>
+                      <input type="date" value={ev.date} onChange={e => updateEvent(ev.id, 'date', e.target.value)} className="bg-white border border-slate-200 p-2.5 rounded-xl text-xs font-semibold focus:outline-none"/>
+                    </div>
+                    <div className="flex gap-2">
+                      <div className="flex flex-col w-1/2">
+                        <label className="text-[9px] font-bold uppercase tracking-wider text-sky-600 mb-1 pl-0.5">Shared Items</label>
+                        <input type="number" value={ev.totalBill} onChange={e => updateEvent(ev.id, 'totalBill', e.target.value)} className="bg-white border border-slate-200 p-2.5 rounded-xl text-xs font-semibold focus:outline-none text-sky-600" placeholder="0"/>
+                      </div>
+                      <div className="flex flex-col w-1/2">
+                        <label className="text-[9px] font-bold uppercase tracking-wider text-amber-600 mb-1 pl-0.5">Delivery/Fees</label>
+                        <input type="number" value={ev.delivery} onChange={e => updateEvent(ev.id, 'delivery', e.target.value)} className="bg-white border border-slate-200 p-2.5 rounded-xl text-xs font-semibold focus:outline-none text-amber-600" placeholder="0"/>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* PARTICIPANT ENTRY CARDS */}
+                  <div className="bg-white rounded-xl border border-slate-200/60 overflow-hidden">
+                    <div className="flex justify-between items-center p-3 sm:p-3.5 border-b border-slate-100 bg-slate-50">
+                      <h4 className="text-[10px] font-bold uppercase text-slate-700 tracking-wider">Participants</h4>
+                      <button onClick={() => addParticipant(ev.id)} className="text-sky-600 bg-sky-50 font-bold text-[9px] uppercase flex items-center gap-0.5 px-2.5 py-1.5 rounded-lg border border-sky-100 active:scale-95 transition-transform">
+                        <Plus size={11}/> Add Person
+                      </button>
+                    </div>
+                    
+                    <div className="divide-y divide-slate-100">
+                      {ev.participants.map((p: any) => {
+                        const share = calculateShare(ev, p);
+                        return (
+                          <div key={p.id} className="p-3 sm:p-4 flex flex-col gap-2.5">
+                            <div className="flex flex-wrap sm:flex-nowrap items-center gap-2">
+                              <div className="w-6 h-6 rounded-full bg-slate-100 flex items-center justify-center text-[10px] font-bold text-slate-400 shrink-0">P</div>
+                              
+                              <div className="relative flex-grow min-w-[100px]">
+                                <input 
+                                  type="text" 
+                                  placeholder="Name" 
+                                  value={p.name} 
+                                  onChange={e => {
+                                    updateParticipant(ev.id, p.id, "name", e.target.value);
+                                    setFocusedParticipantId(p.id);
+                                  }} 
+                                  onFocus={() => setFocusedParticipantId(p.id)}
+                                  onBlur={() => setTimeout(() => setFocusedParticipantId(null), 200)}
+                                  className="w-full bg-transparent border-none focus:outline-none font-bold text-xs sm:text-sm p-0"
+                                />
+                                {focusedParticipantId === p.id && directory.length > 0 && (
+                                  <div className="absolute top-full left-0 mt-2 w-48 bg-white border border-slate-200 shadow-xl rounded-xl z-50 max-h-48 overflow-y-auto">
+                                    {directory.filter(user => user.name.toLowerCase().includes(p.name.toLowerCase()) || user.nickname.toLowerCase().includes(p.name.toLowerCase())).map(user => (
+                                      <div 
+                                        key={user.id} 
+                                        className="p-2.5 hover:bg-slate-50 cursor-pointer border-b border-slate-100 last:border-0"
+                                        onClick={() => {
+                                          updateParticipant(ev.id, p.id, "name", user.name);
+                                          setFocusedParticipantId(null);
+                                        }}
+                                      >
+                                        <p className="text-xs font-bold text-slate-800">{user.name}</p>
+                                        {user.nickname && <p className="text-[9px] text-slate-400 font-bold uppercase tracking-wider">{user.nickname}</p>}
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                              
+                              <div className="w-20 text-right font-extrabold text-xs sm:text-sm text-slate-800">
+                                <span className="text-[9px] text-slate-400 mr-0.5 font-bold">MVR</span>{share.toFixed(0)}
+                              </div>
+
+                              <button 
+                                onClick={() => updateParticipant(ev.id, p.id, "hasPaid", !p.hasPaid)}
+                                className={`px-2 py-1 rounded-lg text-[9px] font-bold uppercase tracking-wider transition-colors w-16 text-center shrink-0 ${p.hasPaid ? 'bg-emerald-50 text-emerald-600 border border-emerald-100' : 'bg-amber-50 text-amber-600 border border-amber-100 hover:bg-amber-100'}`}
+                              >
+                                {p.hasPaid ? 'Paid' : 'Pending'}
+                              </button>
+                              
+                              <button onClick={() => removeParticipant(ev.id, p.id)} className="text-slate-300 hover:text-rose-500 p-0.5 shrink-0"><Trash2 size={14}/></button>
+                            </div>
+
+                            <div className="pl-8 flex gap-2">
+                              <button 
+                                onClick={() => updateParticipant(ev.id, p.id, "paysMain", p.paysMain === false ? true : false)}
+                                className={`px-2 py-0.5 rounded-md text-[8px] font-bold uppercase tracking-wider transition-colors text-center ${p.paysMain !== false ? 'bg-sky-50 text-sky-600' : 'bg-slate-100 text-slate-400 line-through'}`}
+                              >
+                                {p.paysMain !== false ? 'Bill: Yes' : 'Bill: No'}
+                              </button>
+                              <button 
+                                onClick={() => updateParticipant(ev.id, p.id, "paysDelivery", p.paysDelivery === false ? true : false)}
+                                className={`px-2 py-0.5 rounded-md text-[8px] font-bold uppercase tracking-wider transition-colors text-center ${p.paysDelivery !== false ? 'bg-indigo-50 text-indigo-600' : 'bg-slate-100 text-slate-400 line-through'}`}
+                              >
+                                {p.paysDelivery !== false ? 'Deliv: Yes' : 'Deliv: No'}
+                              </button>
+                            </div>
+
+                            <div className="pl-8 space-y-1.5">
+                              {(p.items || []).map((item: any) => (
+                                <div key={item.id} className="flex items-center gap-1.5 sm:gap-2">
+                                  <input 
+                                    type="text" 
+                                    placeholder="Item Name" 
+                                    maxLength={18}
+                                    list={`master-items-${ev.id}`}
+                                    value={item.desc} 
+                                    onChange={e => updateParticipantItem(ev.id, p.id, item.id, "desc", e.target.value)} 
+                                    className="flex-grow min-w-0 bg-slate-50 rounded-lg border border-slate-100 focus:outline-none text-xs font-semibold p-1.5" 
+                                  />
+                                  <input 
+                                    type="number" 
+                                    placeholder="Qty" 
+                                    value={item.qty} 
+                                    onChange={e => updateParticipantItem(ev.id, p.id, item.id, "qty", e.target.value)} 
+                                    className="w-10 sm:w-12 bg-slate-50 rounded-lg border border-slate-100 focus:outline-none text-xs font-semibold p-1.5 text-center shrink-0" 
+                                  />
+                                  <input 
+                                    type="number" 
+                                    placeholder="Price/ea" 
+                                    value={item.price} 
+                                    onChange={e => updateParticipantItem(ev.id, p.id, item.id, "price", e.target.value)} 
+                                    className="w-16 sm:w-20 bg-slate-50 rounded-lg border border-slate-100 focus:outline-none text-xs font-semibold p-1.5 text-center shrink-0" 
+                                  />
+                                  <button onClick={() => removeParticipantItem(ev.id, p.id, item.id)} className="text-slate-300 hover:text-rose-500 p-0.5 shrink-0"><X size={13}/></button>
+                                </div>
+                              ))}
+                              
+                              <datalist id={`master-items-${ev.id}`}>
+                                {(ev.invoiceItems || []).map((inv: any) => (
+                                  <option key={inv.id} value={inv.desc} />
+                                ))}
+                              </datalist>
+
+                              <button onClick={() => addParticipantItem(ev.id, p.id)} className="text-slate-400 font-bold text-[9px] uppercase tracking-wider flex items-center gap-0.5 hover:text-slate-700">
+                                <Plus size={9}/> Add Personal Item
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div className="flex justify-between items-center gap-3">
+                    <button onClick={() => deleteEvent(ev.id)} className="text-rose-500 text-[10px] font-bold uppercase flex items-center gap-0.5 hover:text-rose-700">
+                      <Trash2 size={13}/> Delete Event
+                    </button>
+                    <button onClick={() => saveEvent(ev.id)} className="h-9 px-5 rounded-xl bg-slate-900 text-white font-semibold text-xs uppercase tracking-wider shadow-xs active:scale-95 transition-all">
+                      Save Event
+                    </button>
+                  </div>
+
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
 
       {showBankModal && (
@@ -1303,6 +1257,6 @@ export default function SplitterPage() {
           </div>
         </div>
       )}
-    </main>
+    </div>
   );
 }

@@ -1,69 +1,151 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
 import { 
-  Wallet, Calculator, ShoppingCart, PieChart, Settings, 
-  Banknote, Plus, Trash2, TrendingDown, 
-  CheckCircle2, AlertCircle, ArrowRightLeft 
+  Plus, Trash2, TrendingDown, TrendingUp, 
+  CheckCircle2, AlertCircle, ArrowRightLeft, 
+  Search, Filter, Calendar, Tag, ArrowUpRight, ArrowDownRight, Wallet, X
 } from "lucide-react";
-import Link from "next/link";
+
+interface Transaction {
+  id: string;
+  title: string;
+  category: string;
+  amount: number;
+  type: 'income' | 'expense';
+  created_at: string;
+  transaction_date?: string;
+}
+
+interface Loan {
+  id: string;
+  person_name: string;
+  loan_type: 'lent' | 'borrowed';
+  amount: number;
+  is_paid: boolean;
+  created_at: string;
+}
 
 export default function TrackerPage() {
-  const [activeTab, setActiveTab] = useState<'spending' | 'loans'>('spending');
+  const [activeTab, setActiveTab] = useState<'transactions' | 'loans'>('transactions');
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState<{ message: string, type: 'success' | 'error' } | null>(null);
 
-  const [bills, setBills] = useState<any[]>([]);
-  const [loans, setLoans] = useState<any[]>([]);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [loans, setLoans] = useState<Loan[]>([]);
 
-  const [billTitle, setBillTitle] = useState("");
-  const [billCategory, setBillCategory] = useState("Food & Drink");
-  const [billAmount, setBillAmount] = useState("");
+  // Transaction Form States
+  const [transTitle, setTransTitle] = useState("");
+  const [transCategory, setTransCategory] = useState("Food & Drink");
+  const [transAmount, setTransAmount] = useState("");
+  const [transType, setTransType] = useState<'expense' | 'income'>('expense');
 
+  // Loan Form States
   const [loanName, setLoanName] = useState("");
   const [loanType, setLoanType] = useState<'lent' | 'borrowed'>('lent');
   const [loanAmount, setLoanAmount] = useState("");
+
+  // Filters
+  const [searchQuery, setSearchQuery] = useState("");
+  const [selectedCategory, setSelectedCategory] = useState<string>("all");
+  const [filterType, setFilterType] = useState<'all' | 'income' | 'expense'>('all');
+
+  const categories = [
+    "Food & Drink",
+    "Salary / Income",
+    "Business / Trade",
+    "Subscriptions",
+    "Transport & Fuel",
+    "Shopping",
+    "Bills & Utilities",
+    "Health",
+    "Other"
+  ];
 
   const showToast = (message: string, type: 'success' | 'error' = 'success') => {
     setToast({ message, type });
     setTimeout(() => setToast(null), 3000);
   };
 
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     setLoading(true);
     const [billsRes, loansRes] = await Promise.all([
       supabase.from('bills').select('*').order('created_at', { ascending: false }),
       supabase.from('loans').select('*').order('created_at', { ascending: false })
     ]);
 
-    if (billsRes.data) setBills(billsRes.data);
+    if (billsRes.data) {
+      const mapped = billsRes.data.map((b: any) => ({
+        ...b,
+        type: b.type || (b.category === "Salary / Income" || b.category === "Business / Trade" ? "income" : "expense")
+      }));
+      setTransactions(mapped);
+    }
+
     if (loansRes.data) setLoans(loansRes.data);
     setLoading(false);
-  };
+  }, []);
 
   useEffect(() => {
     fetchData();
-  }, []);
+  }, [fetchData]);
 
-  const handleAddBill = async () => {
-    if (!billTitle || !billAmount) return showToast("Enter title and amount", "error");
-    const { error } = await supabase.from('bills').insert({ title: billTitle, category: billCategory, amount: parseFloat(billAmount) });
-    if (error) showToast("Error saving expense", "error");
-    else { showToast("Expense added!"); setBillTitle(""); setBillAmount(""); fetchData(); }
+  // --- Handlers ---
+  const handleAddTransaction = async () => {
+    if (!transTitle.trim() || !transAmount) return showToast("Enter title and amount", "error");
+    const parsedAmt = parseFloat(transAmount) || 0;
+    if (parsedAmt <= 0) return showToast("Enter a valid amount", "error");
+
+    const payload = {
+      title: transTitle.trim(),
+      category: transCategory,
+      amount: parsedAmt,
+      type: transType,
+      transaction_date: new Date().toISOString().split('T')[0]
+    };
+
+    const { error } = await supabase.from('bills').insert(payload);
+    if (error) {
+      showToast(`Error saving: ${error.message}`, "error");
+    } else {
+      showToast(`${transType === 'income' ? 'Income' : 'Expense'} recorded!`);
+      setTransTitle("");
+      setTransAmount("");
+      fetchData();
+    }
   };
 
-  const handleDeleteBill = async (id: string) => {
-    if (!confirm("Delete this expense?")) return;
-    await supabase.from('bills').delete().eq('id', id);
-    fetchData(); showToast("Expense deleted");
+  const handleDeleteTransaction = async (id: string) => {
+    if (!confirm("Delete this entry?")) return;
+    const { error } = await supabase.from('bills').delete().eq('id', id);
+    if (!error) {
+      fetchData();
+      showToast("Transaction deleted");
+    }
   };
 
   const handleAddLoan = async () => {
-    if (!loanName || !loanAmount) return showToast("Enter name and amount", "error");
-    const { error } = await supabase.from('loans').insert({ person_name: loanName, loan_type: loanType, amount: parseFloat(loanAmount), is_paid: false });
-    if (error) showToast("Error saving loan", "error");
-    else { showToast("Loan recorded!"); setLoanName(""); setLoanAmount(""); fetchData(); }
+    if (!loanName.trim() || !loanAmount) return showToast("Enter person's name and amount", "error");
+    const parsedAmt = parseFloat(loanAmount) || 0;
+    if (parsedAmt <= 0) return showToast("Enter a valid amount", "error");
+
+    const payload = {
+      person_name: loanName.trim(),
+      loan_type: loanType,
+      amount: parsedAmt,
+      is_paid: false
+    };
+
+    const { error } = await supabase.from('loans').insert(payload);
+    if (error) {
+      showToast(`Error saving loan: ${error.message}`, "error");
+    } else {
+      showToast("Loan recorded!");
+      setLoanName("");
+      setLoanAmount("");
+      fetchData();
+    }
   };
 
   const toggleLoanStatus = async (id: string, currentStatus: boolean) => {
@@ -74,172 +156,415 @@ export default function TrackerPage() {
   const handleDeleteLoan = async (id: string) => {
     if (!confirm("Delete this loan record?")) return;
     await supabase.from('loans').delete().eq('id', id);
-    fetchData(); showToast("Loan deleted");
+    fetchData();
+    showToast("Loan deleted");
   };
 
-  const totalLent = loans.filter(l => l.loan_type === 'lent' && !l.is_paid).reduce((s, l) => s + parseFloat(l.amount), 0);
-  const totalBorrowed = loans.filter(l => l.loan_type === 'borrowed' && !l.is_paid).reduce((s, l) => s + parseFloat(l.amount), 0);
+  // --- Financial Math Engine ---
+  const totals = useMemo(() => {
+    let income = 0;
+    let expense = 0;
+
+    transactions.forEach(t => {
+      const amt = Number(t.amount) || 0;
+      if (t.type === 'income') income += amt;
+      else expense += amt;
+    });
+
+    return { income, expense, net: income - expense };
+  }, [transactions]);
+
+  const loanTotals = useMemo(() => {
+    const lent = loans.filter(l => l.loan_type === 'lent' && !l.is_paid).reduce((s, l) => s + (Number(l.amount) || 0), 0);
+    const borrowed = loans.filter(l => l.loan_type === 'borrowed' && !l.is_paid).reduce((s, l) => s + (Number(l.amount) || 0), 0);
+    return { lent, borrowed };
+  }, [loans]);
+
+  // Spending Breakdown By Category
+  const categoryBreakdown = useMemo(() => {
+    const map: Record<string, number> = {};
+    let totalExpenseCounted = 0;
+
+    transactions.filter(t => t.type === 'expense').forEach(t => {
+      const amt = Number(t.amount) || 0;
+      map[t.category] = (map[t.category] || 0) + amt;
+      totalExpenseCounted += amt;
+    });
+
+    return Object.entries(map).map(([cat, amt]) => ({
+      category: cat,
+      amount: amt,
+      percent: totalExpenseCounted > 0 ? Math.round((amt / totalExpenseCounted) * 100) : 0
+    })).sort((a, b) => b.amount - a.amount);
+  }, [transactions]);
+
+  // Filtered Transactions List
+  const filteredTransactions = useMemo(() => {
+    return transactions.filter(t => {
+      const matchesSearch = t.title.toLowerCase().includes(searchQuery.toLowerCase()) || 
+                            t.category.toLowerCase().includes(searchQuery.toLowerCase());
+      const matchesCategory = selectedCategory === "all" || t.category === selectedCategory;
+      const matchesType = filterType === "all" || t.type === filterType;
+      return matchesSearch && matchesCategory && matchesType;
+    });
+  }, [transactions, searchQuery, selectedCategory, filterType]);
 
   return (
-    <main className="min-h-screen bg-[#F0F4F8] text-[#364d54] font-sans flex relative">
+    <div className="w-full max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-3 sm:py-8 pb-28">
       
+      {/* Toast Notification */}
       {toast && (
-        <div className={`fixed top-6 right-1/2 translate-x-1/2 lg:translate-x-0 lg:right-6 z-[300] px-6 py-4 rounded-2xl shadow-2xl flex items-center gap-3 text-sm font-bold animate-in fade-in slide-in-from-top-5 duration-300 ${toast.type === 'success' ? 'bg-[#3a5b5e] text-white' : 'bg-red-500 text-white'}`}>
-          {toast.type === 'success' ? <CheckCircle2 size={20} /> : <AlertCircle size={20} />}
-          {toast.message}
+        <div className={`fixed top-4 left-1/2 -translate-x-1/2 z-[999] px-4 py-2.5 rounded-xl shadow-lg text-xs font-bold text-white flex items-center gap-2 animate-in slide-in-from-top-4 ${toast.type === 'error' ? 'bg-rose-500' : 'bg-slate-900'}`}>
+          {toast.type === 'error' ? <AlertCircle size={15}/> : <CheckCircle2 size={15}/>}
+          <span>{toast.message}</span>
         </div>
       )}
 
-      {/* DESKTOP SIDEBAR */}
-      <aside className="hidden lg:flex w-72 bg-white border-r border-[#E0E7E9] flex-col p-8 sticky top-0 h-screen shrink-0 z-40">
-        <div className="mb-12">
-          <p className="text-[10px] font-black uppercase tracking-[0.2em] text-[#5fa4ad] mb-1">LexCorp Systems</p>
-          <h1 className="text-2xl font-black tracking-tighter uppercase">Lextrack</h1>
+      {/* HEADER & TAB SWITCHER */}
+      <header className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 mb-5">
+        <div>
+          <h2 className="text-xl sm:text-2xl font-black text-slate-900 flex items-center gap-2">
+            <Wallet size={22} className="text-indigo-600"/> Cash Flow Tracker
+          </h2>
+          <p className="text-xs font-semibold text-slate-500 mt-0.5">Track daily income, personal spending, and active loans.</p>
         </div>
-        <nav className="space-y-3 flex-grow">
-          <Link href="/" className="w-full flex items-center gap-4 px-5 py-4 rounded-2xl text-sm font-bold hover:bg-[#F8FAFB] text-[#A0AEC0] transition-all"><Wallet size={20}/> Dashboard</Link>
-          <Link href="/tracker" className="w-full flex items-center gap-4 px-5 py-4 rounded-2xl text-sm font-bold bg-[#3a5b5e] text-white shadow-lg transition-all"><Banknote size={20}/> Tracker</Link>
-          <Link href="/splitter" className="w-full flex items-center gap-4 px-5 py-4 rounded-2xl text-sm font-bold hover:bg-[#F8FAFB] text-[#A0AEC0] transition-all"><Calculator size={20}/> Splitter</Link>
-          <Link href="/shop-clearing" className="w-full flex items-center gap-4 px-5 py-4 rounded-2xl text-sm font-bold hover:bg-[#F8FAFB] text-[#A0AEC0] transition-all"><ShoppingCart size={20}/> Clearing</Link>
-          <Link href="/analytics" className="w-full flex items-center gap-4 px-5 py-4 rounded-2xl text-sm font-bold hover:bg-[#F8FAFB] text-[#A0AEC0] transition-all"><PieChart size={20}/> Analytics</Link>
-        </nav>
-        <button className="flex items-center gap-4 px-5 py-4 text-sm font-bold opacity-40"><Settings size={20}/> Settings</button>
-      </aside>
 
-      {/* MAIN CONTENT AREA */}
-      <div className="flex-grow flex flex-col min-h-screen overflow-y-auto">
-        <div className="w-full max-w-[900px] mx-auto px-4 lg:px-8 py-6 lg:py-10 pb-40">
+        <div className="flex items-center gap-1 bg-white border border-slate-200 p-1 rounded-xl shadow-2xs w-fit">
+          <button 
+            onClick={() => setActiveTab('transactions')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold uppercase tracking-wider transition-colors ${activeTab === 'transactions' ? 'bg-slate-900 text-white shadow-2xs' : 'text-slate-500'}`}
+          >
+            💸 Cash Flow
+          </button>
+          <button 
+            onClick={() => setActiveTab('loans')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold uppercase tracking-wider transition-colors ${activeTab === 'loans' ? 'bg-slate-900 text-white shadow-2xs' : 'text-slate-500'}`}
+          >
+            🔄 Loans ({loans.filter(l => !l.is_paid).length})
+          </button>
+        </div>
+      </header>
+
+      {/* TAB 1: TRANSACTIONS (INCOME & EXPENSE) */}
+      {activeTab === 'transactions' && (
+        <div className="space-y-5 animate-in fade-in duration-200">
           
-          <header className="flex justify-between items-center mb-6">
-            <div>
-              <h2 className="text-2xl lg:text-3xl font-black tracking-tight">Finance Tracker</h2>
-              <p className="text-[10px] font-bold text-[#A0AEC0] uppercase tracking-widest mt-1">Manage Loans & Expenses</p>
+          {/* TOP METRICS GRID */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="bg-white border border-slate-200/80 p-4 rounded-2xl shadow-2xs flex items-center justify-between">
+              <div>
+                <span className="text-[9px] font-extrabold uppercase text-slate-400 tracking-wider">Total Income</span>
+                <p className="text-xl font-black text-emerald-600 mt-0.5">MVR {totals.income.toLocaleString()}</p>
+              </div>
+              <div className="w-9 h-9 rounded-xl bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-600 shrink-0">
+                <ArrowUpRight size={18}/>
+              </div>
             </div>
-          </header>
 
-          <div className="flex bg-white p-1 rounded-2xl shadow-sm border border-[#E0E7E9] mb-8 relative">
-            <button onClick={() => setActiveTab('spending')} className={`flex-1 py-3 rounded-xl text-xs font-black uppercase tracking-widest transition-all z-10 ${activeTab === 'spending' ? 'text-white' : 'text-[#A0AEC0]'}`}>Daily Spending</button>
-            <button onClick={() => setActiveTab('loans')} className={`flex-1 py-3 rounded-xl text-xs font-black uppercase tracking-widest transition-all z-10 ${activeTab === 'loans' ? 'text-white' : 'text-[#A0AEC0]'}`}>Personal Loans</button>
-            <div className={`absolute top-1 bottom-1 w-[calc(50%-4px)] bg-[#3a5b5e] rounded-xl transition-all duration-300 ease-out shadow-md ${activeTab === 'spending' ? 'left-1' : 'left-[calc(50%+2px)]'}`} />
+            <div className="bg-white border border-slate-200/80 p-4 rounded-2xl shadow-2xs flex items-center justify-between">
+              <div>
+                <span className="text-[9px] font-extrabold uppercase text-slate-400 tracking-wider">Total Expenses</span>
+                <p className="text-xl font-black text-rose-600 mt-0.5">MVR {totals.expense.toLocaleString()}</p>
+              </div>
+              <div className="w-9 h-9 rounded-xl bg-rose-50 border border-rose-100 flex items-center justify-center text-rose-600 shrink-0">
+                <ArrowDownRight size={18}/>
+              </div>
+            </div>
+
+            <div className="bg-white border border-slate-200/80 p-4 rounded-2xl shadow-2xs flex items-center justify-between">
+              <div>
+                <span className="text-[9px] font-extrabold uppercase text-slate-400 tracking-wider">Net Cash Flow</span>
+                <p className={`text-xl font-black mt-0.5 ${totals.net >= 0 ? 'text-slate-900' : 'text-rose-600'}`}>
+                  MVR {totals.net.toLocaleString()}
+                </p>
+              </div>
+              <div className="w-9 h-9 rounded-xl bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-700 shrink-0">
+                <Wallet size={18}/>
+              </div>
+            </div>
           </div>
 
-          {activeTab === 'spending' && (
-            <div className="animate-in fade-in slide-in-from-bottom-4">
-              <div className="bg-white p-6 rounded-[2rem] shadow-sm border border-[#E0E7E9] mb-8">
-                <h3 className="text-[11px] font-black uppercase tracking-[0.2em] text-[#A0AEC0] mb-4">Log New Expense</h3>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                  <input type="text" placeholder="What did you buy?" value={billTitle} onChange={e => setBillTitle(e.target.value)} className="bg-[#F8FAFB] border-none p-4 rounded-2xl font-bold text-sm focus:ring-2 focus:ring-[#5fa4ad]"/>
-                  <select value={billCategory} onChange={e => setBillCategory(e.target.value)} className="bg-[#F8FAFB] border-none p-4 rounded-2xl font-bold text-sm text-[#364d54] focus:ring-2 focus:ring-[#5fa4ad]">
-                    <option value="Food & Drink">Food & Drink</option>
-                    <option value="Subscriptions">Subscriptions</option>
-                    <option value="Transport">Transport</option>
-                    <option value="Shopping">Shopping</option>
-                    <option value="Other">Other</option>
+          {/* LOG NEW TRANSACTION PANEL */}
+          <div className="bg-white rounded-2xl border border-slate-200/80 p-3.5 sm:p-5 shadow-2xs space-y-3">
+            <div className="flex justify-between items-center border-b border-slate-100 pb-2.5">
+              <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wider flex items-center gap-1.5">
+                <Plus size={15} className="text-indigo-600"/> Quick Log Entry
+              </h3>
+
+              {/* Type Switcher */}
+              <div className="flex items-center gap-1 bg-slate-100 p-0.5 rounded-lg border border-slate-200">
+                <button 
+                  type="button"
+                  onClick={() => setTransType('expense')}
+                  className={`px-2.5 py-1 rounded-md text-[10px] font-black uppercase transition-colors ${transType === 'expense' ? 'bg-rose-600 text-white' : 'text-slate-500'}`}
+                >
+                  - Expense
+                </button>
+                <button 
+                  type="button"
+                  onClick={() => setTransType('income')}
+                  className={`px-2.5 py-1 rounded-md text-[10px] font-black uppercase transition-colors ${transType === 'income' ? 'bg-emerald-600 text-white' : 'text-slate-500'}`}
+                >
+                  + Income
+                </button>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-12 gap-2.5">
+              <div className="sm:col-span-5">
+                <input 
+                  type="text" 
+                  placeholder={transType === 'income' ? "Income Source (e.g. Salary, Freelance)" : "Expense Description (e.g. Groceries)"} 
+                  value={transTitle} 
+                  onChange={(e) => setTransTitle(e.target.value)} 
+                  className="w-full bg-slate-50 border border-slate-200 p-2.5 rounded-xl text-xs font-bold text-slate-800 focus:outline-none"
+                />
+              </div>
+
+              <div className="sm:col-span-4">
+                <select 
+                  value={transCategory} 
+                  onChange={(e) => setTransCategory(e.target.value)} 
+                  className="w-full bg-slate-50 border border-slate-200 p-2.5 rounded-xl text-xs font-bold text-slate-700 focus:outline-none"
+                >
+                  {categories.map((c, i) => (
+                    <option key={i} value={c}>{c}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="sm:col-span-3">
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-black text-slate-400">MVR</span>
+                  <input 
+                    type="number" 
+                    placeholder="0.00" 
+                    value={transAmount} 
+                    onChange={(e) => setTransAmount(e.target.value)} 
+                    className="w-full bg-slate-50 border border-slate-200 py-2.5 pl-12 pr-3 rounded-xl text-xs font-bold text-slate-900 focus:outline-none"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <button 
+              onClick={handleAddTransaction}
+              className={`w-full h-10 text-white font-bold text-xs uppercase tracking-wider rounded-xl shadow-2xs transition-transform active:scale-95 flex items-center justify-center gap-1.5 ${transType === 'income' ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-slate-900 hover:bg-slate-800'}`}
+            >
+              <Plus size={14}/> Save {transType === 'income' ? 'Income' : 'Expense'}
+            </button>
+          </div>
+
+          {/* SPENDING BREAKDOWN & HISTORY GRID */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+            
+            {/* LEFT 4 COLUMNS: CATEGORY SPENDING BAR CHART */}
+            <div className="lg:col-span-4 bg-white rounded-2xl border border-slate-200/80 p-4 shadow-2xs space-y-3">
+              <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wider flex items-center gap-1.5">
+                <Tag size={14} className="text-indigo-600"/> Expense Categories
+              </h3>
+
+              {categoryBreakdown.length === 0 ? (
+                <p className="text-xs text-slate-400 italic text-center py-6">No expenses logged to summarize.</p>
+              ) : (
+                <div className="space-y-3">
+                  {categoryBreakdown.map((item, idx) => (
+                    <div key={idx} className="space-y-1">
+                      <div className="flex justify-between items-center text-xs font-bold">
+                        <span className="text-slate-700 truncate">{item.category}</span>
+                        <span className="text-slate-900 font-black">MVR {item.amount.toLocaleString()}</span>
+                      </div>
+                      <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden">
+                        <div 
+                          className="bg-indigo-600 h-full rounded-full transition-all duration-300"
+                          style={{ width: `${item.percent}%` }}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* RIGHT 8 COLUMNS: TRANSACTIONS LOG WITH SEARCH & FILTERS */}
+            <div className="lg:col-span-8 bg-white rounded-2xl border border-slate-200/80 p-4 shadow-2xs space-y-3">
+              <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-2 pb-2 border-b border-slate-100">
+                <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wider">Transaction History</h3>
+
+                {/* Filter Controls */}
+                <div className="flex items-center gap-1.5">
+                  <div className="relative grow sm:w-40">
+                    <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400"/>
+                    <input 
+                      type="text" 
+                      placeholder="Search..." 
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-200 pl-8 pr-2 py-1 rounded-lg text-xs font-bold focus:outline-none"
+                    />
+                  </div>
+
+                  <select 
+                    value={filterType}
+                    onChange={(e) => setFilterType(e.target.value as any)}
+                    className="bg-slate-50 border border-slate-200 p-1 rounded-lg text-[10px] font-bold text-slate-700 focus:outline-none"
+                  >
+                    <option value="all">All Types</option>
+                    <option value="income">Income Only</option>
+                    <option value="expense">Expenses Only</option>
                   </select>
-                  <div className="flex gap-2">
-                    <input type="number" placeholder="MVR" value={billAmount} onChange={e => setBillAmount(e.target.value)} className="w-full bg-[#F8FAFB] border-none p-4 rounded-2xl font-bold text-sm focus:ring-2 focus:ring-[#5fa4ad]"/>
-                    <button onClick={handleAddBill} className="bg-[#3a5b5e] text-white px-5 rounded-2xl active:scale-95 transition-transform"><Plus size={20}/></button>
-                  </div>
                 </div>
               </div>
 
-              <h3 className="text-[11px] font-black uppercase tracking-[0.2em] text-[#A0AEC0] mb-4 pl-2">Recent Expenses</h3>
-              <div className="space-y-3">
-                {bills.length === 0 && <p className="text-center text-sm font-bold text-[#A0AEC0] py-10">No expenses logged yet.</p>}
-                {bills.map(bill => (
-                  <div key={bill.id} className="flex justify-between items-center bg-white p-5 rounded-[2rem] border border-[#E0E7E9] shadow-sm">
-                    <div className="flex items-center gap-4">
-                      <div className="w-12 h-12 rounded-2xl bg-orange-50 flex items-center justify-center border border-orange-100">
-                        <TrendingDown size={18} className="text-orange-500" />
+              {filteredTransactions.length === 0 ? (
+                <p className="text-xs text-slate-400 italic text-center py-10">No matching transactions found.</p>
+              ) : (
+                <div className="divide-y divide-slate-100 space-y-1 max-h-[60vh] overflow-y-auto pr-1">
+                  {filteredTransactions.map((t) => (
+                    <div key={t.id} className="flex justify-between items-center py-2.5 first:pt-0 hover:bg-slate-50/50 rounded-xl px-2 transition-colors">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className={`w-8 h-8 rounded-xl flex items-center justify-center border shrink-0 ${t.type === 'income' ? 'bg-emerald-50 border-emerald-100 text-emerald-600' : 'bg-rose-50 border-rose-100 text-rose-600'}`}>
+                          {t.type === 'income' ? <TrendingUp size={15}/> : <TrendingDown size={15}/>}
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-xs font-bold text-slate-900 truncate">{t.title}</p>
+                          <p className="text-[10px] font-semibold text-slate-400 flex items-center gap-1 mt-0.5">
+                            <span>{t.category}</span>
+                            <span>•</span>
+                            <span>{new Date(t.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}</span>
+                          </p>
+                        </div>
                       </div>
-                      <div>
-                        <p className="font-black text-[#364d54]">{bill.title}</p>
-                        <p className="text-[10px] text-[#A0AEC0] font-bold uppercase tracking-widest mt-0.5">{bill.category} • {new Date(bill.created_at).toLocaleDateString()}</p>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-4">
-                      <p className="font-black text-orange-500 text-lg">- {Number(bill.amount).toLocaleString()}</p>
-                      <button onClick={() => handleDeleteBill(bill.id)} className="text-red-300 hover:text-red-500 p-2 transition-colors"><Trash2 size={16}/></button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
 
-          {activeTab === 'loans' && (
-            <div className="animate-in fade-in slide-in-from-bottom-4">
-              <div className="grid grid-cols-2 gap-4 mb-6">
-                <div className="bg-white p-5 rounded-[2rem] border border-[#E0E7E9] shadow-sm">
-                  <p className="text-[9px] font-black uppercase tracking-widest text-[#A0AEC0] mb-1">People Owe Me</p>
-                  <p className="text-2xl font-black text-green-500">MVR {totalLent.toLocaleString()}</p>
-                </div>
-                <div className="bg-white p-5 rounded-[2rem] border border-[#E0E7E9] shadow-sm">
-                  <p className="text-[9px] font-black uppercase tracking-widest text-[#A0AEC0] mb-1">I Owe People</p>
-                  <p className="text-2xl font-black text-red-500">MVR {totalBorrowed.toLocaleString()}</p>
-                </div>
-              </div>
-
-              <div className="bg-[#3a5b5e] p-6 rounded-[2rem] shadow-xl text-white mb-8 relative overflow-hidden">
-                <div className="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full blur-2xl -mr-10 -mt-10 pointer-events-none" />
-                <h3 className="text-[11px] font-black uppercase tracking-[0.2em] opacity-70 mb-4">Record a Loan</h3>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                  <input type="text" placeholder="Person's Name" value={loanName} onChange={e => setLoanName(e.target.value)} className="bg-white/10 placeholder-white/50 border border-white/20 p-4 rounded-2xl font-bold text-sm text-white focus:outline-none focus:bg-white/20"/>
-                  <div className="flex bg-white/10 rounded-2xl border border-white/20 p-1">
-                    <button onClick={() => setLoanType('lent')} className={`flex-1 rounded-xl text-[10px] font-black uppercase tracking-widest transition-colors ${loanType === 'lent' ? 'bg-white text-[#3a5b5e]' : 'text-white/60'}`}>I Lent</button>
-                    <button onClick={() => setLoanType('borrowed')} className={`flex-1 rounded-xl text-[10px] font-black uppercase tracking-widest transition-colors ${loanType === 'borrowed' ? 'bg-white text-[#3a5b5e]' : 'text-white/60'}`}>I Borrowed</button>
-                  </div>
-                  <div className="flex gap-2">
-                    <input type="number" placeholder="MVR Amount" value={loanAmount} onChange={e => setLoanAmount(e.target.value)} className="w-full bg-white/10 placeholder-white/50 border border-white/20 p-4 rounded-2xl font-bold text-sm text-white focus:outline-none focus:bg-white/20"/>
-                    <button onClick={handleAddLoan} className="bg-white text-[#3a5b5e] px-5 rounded-2xl active:scale-95 transition-transform"><Plus size={20}/></button>
-                  </div>
-                </div>
-              </div>
-
-              <h3 className="text-[11px] font-black uppercase tracking-[0.2em] text-[#A0AEC0] mb-4 pl-2">Active Loans</h3>
-              <div className="space-y-3">
-                {loans.length === 0 && <p className="text-center text-sm font-bold text-[#A0AEC0] py-10">No active loans.</p>}
-                {loans.map(loan => (
-                  <div key={loan.id} className={`flex flex-col sm:flex-row sm:items-center justify-between bg-white p-5 rounded-[2rem] border shadow-sm transition-all ${loan.is_paid ? 'border-green-100 opacity-60' : 'border-[#E0E7E9]'}`}>
-                    <div className="flex items-center gap-4 mb-4 sm:mb-0">
-                      <div className={`w-12 h-12 rounded-2xl flex items-center justify-center border ${loan.loan_type === 'lent' ? 'bg-green-50 border-green-100 text-green-500' : 'bg-red-50 border-red-100 text-red-500'}`}>
-                        <ArrowRightLeft size={18} />
-                      </div>
-                      <div>
-                        <p className="font-black text-[#364d54] text-lg">{loan.person_name}</p>
-                        <p className={`text-[10px] font-bold uppercase tracking-widest mt-0.5 ${loan.loan_type === 'lent' ? 'text-green-500' : 'text-red-500'}`}>
-                          {loan.loan_type === 'lent' ? 'Owes You' : 'You Owe'} • {new Date(loan.created_at).toLocaleDateString()}
-                        </p>
-                      </div>
-                    </div>
-                    <div className="flex items-center justify-between sm:justify-end gap-4 w-full sm:w-auto">
-                      <p className={`font-black text-xl ${loan.loan_type === 'lent' ? 'text-green-500' : 'text-red-500'}`}>
-                        {Number(loan.amount).toLocaleString()}
-                      </p>
-                      <div className="flex items-center gap-2">
-                        <button onClick={() => toggleLoanStatus(loan.id, loan.is_paid)} className={`px-4 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-colors ${loan.is_paid ? 'bg-green-500 text-white shadow-md' : 'bg-gray-100 text-gray-400 hover:bg-gray-200'}`}>
-                          {loan.is_paid ? 'Settled' : 'Mark Paid'}
+                      <div className="flex items-center gap-3 shrink-0">
+                        <span className={`text-xs font-black ${t.type === 'income' ? 'text-emerald-600' : 'text-rose-600'}`}>
+                          {t.type === 'income' ? '+' : '-'} {Number(t.amount).toLocaleString()} MVR
+                        </span>
+                        <button onClick={() => handleDeleteTransaction(t.id)} className="text-slate-300 hover:text-rose-500 p-1">
+                          <Trash2 size={13}/>
                         </button>
-                        <button onClick={() => handleDeleteLoan(loan.id)} className="text-red-300 hover:text-red-500 p-3 bg-red-50 rounded-xl transition-colors"><Trash2 size={16}/></button>
                       </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* TAB 2: LOANS & DEBTS */}
+      {activeTab === 'loans' && (
+        <div className="space-y-5 animate-in fade-in duration-200">
+          
+          {/* LOAN METRICS */}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="bg-white border border-slate-200/80 p-4 rounded-2xl shadow-2xs">
+              <span className="text-[9px] font-extrabold uppercase text-slate-400 tracking-wider">People Owe Me (Lent)</span>
+              <p className="text-xl font-black text-emerald-600 mt-0.5">MVR {loanTotals.lent.toLocaleString()}</p>
+            </div>
+            <div className="bg-white border border-slate-200/80 p-4 rounded-2xl shadow-2xs">
+              <span className="text-[9px] font-extrabold uppercase text-slate-400 tracking-wider">I Owe People (Borrowed)</span>
+              <p className="text-xl font-black text-rose-600 mt-0.5">MVR {loanTotals.borrowed.toLocaleString()}</p>
+            </div>
+          </div>
+
+          {/* LOG LOAN FORM */}
+          <div className="bg-slate-900 text-white rounded-2xl p-4 sm:p-5 shadow-md space-y-3">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-indigo-300 flex items-center gap-1.5">
+              <ArrowRightLeft size={15}/> Record Loan or Debt
+            </h3>
+
+            <div className="grid grid-cols-1 sm:grid-cols-12 gap-2.5">
+              <input 
+                type="text" 
+                placeholder="Person's Name" 
+                value={loanName} 
+                onChange={(e) => setLoanName(e.target.value)} 
+                className="sm:col-span-5 bg-slate-800 border border-slate-700 p-2.5 rounded-xl text-xs font-bold text-white focus:outline-none placeholder-slate-400"
+              />
+
+              <div className="sm:col-span-4 flex items-center gap-1 bg-slate-800 p-1 rounded-xl border border-slate-700">
+                <button 
+                  type="button"
+                  onClick={() => setLoanType('lent')}
+                  className={`flex-1 py-1 rounded-lg text-[10px] font-black uppercase transition-colors ${loanType === 'lent' ? 'bg-emerald-600 text-white' : 'text-slate-400'}`}
+                >
+                  I Lent
+                </button>
+                <button 
+                  type="button"
+                  onClick={() => setLoanType('borrowed')}
+                  className={`flex-1 py-1 rounded-lg text-[10px] font-black uppercase transition-colors ${loanType === 'borrowed' ? 'bg-rose-600 text-white' : 'text-slate-400'}`}
+                >
+                  I Borrowed
+                </button>
+              </div>
+
+              <input 
+                type="number" 
+                placeholder="MVR Amount" 
+                value={loanAmount} 
+                onChange={(e) => setLoanAmount(e.target.value)} 
+                className="sm:col-span-3 bg-slate-800 border border-slate-700 p-2.5 rounded-xl text-xs font-bold text-white focus:outline-none placeholder-slate-400"
+              />
+            </div>
+
+            <button 
+              onClick={handleAddLoan}
+              className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs uppercase tracking-wider rounded-xl shadow-xs transition-transform active:scale-95"
+            >
+              + Save Loan Record
+            </button>
+          </div>
+
+          {/* ACTIVE LOANS LIST */}
+          <div className="bg-white rounded-2xl border border-slate-200/80 p-4 shadow-2xs space-y-3">
+            <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wider">Active Loan Ledger</h3>
+
+            {loans.length === 0 ? (
+              <p className="text-xs text-slate-400 italic text-center py-8">No active loans recorded.</p>
+            ) : (
+              <div className="space-y-2">
+                {loans.map(loan => (
+                  <div key={loan.id} className={`p-3 rounded-xl border flex items-center justify-between gap-2 transition-all ${loan.is_paid ? 'bg-slate-50 border-slate-200 opacity-60' : 'bg-white border-slate-200 shadow-2xs'}`}>
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <div className={`w-8 h-8 rounded-xl flex items-center justify-center border shrink-0 ${loan.loan_type === 'lent' ? 'bg-emerald-50 border-emerald-100 text-emerald-600' : 'bg-rose-50 border-rose-100 text-rose-600'}`}>
+                        <ArrowRightLeft size={14}/>
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-xs font-bold text-slate-900 truncate">{loan.person_name}</p>
+                        <span className={`text-[9px] font-extrabold uppercase ${loan.loan_type === 'lent' ? 'text-emerald-600' : 'text-rose-600'}`}>
+                          {loan.loan_type === 'lent' ? 'Owes You' : 'You Owe'} • {new Date(loan.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 shrink-0">
+                      <span className={`text-xs font-black ${loan.loan_type === 'lent' ? 'text-emerald-600' : 'text-rose-600'}`}>
+                        MVR {Number(loan.amount).toLocaleString()}
+                      </span>
+
+                      <button 
+                        onClick={() => toggleLoanStatus(loan.id, loan.is_paid)}
+                        className={`px-2.5 py-1 rounded-lg text-[9px] font-black uppercase border transition-colors ${loan.is_paid ? 'bg-emerald-50 text-emerald-600 border-emerald-200' : 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200'}`}
+                      >
+                        {loan.is_paid ? 'Paid ✅' : 'Mark Settled'}
+                      </button>
+
+                      <button onClick={() => handleDeleteLoan(loan.id)} className="text-slate-300 hover:text-rose-500 p-0.5">
+                        <Trash2 size={13}/>
+                      </button>
                     </div>
                   </div>
                 ))}
               </div>
-            </div>
-          )}
+            )}
+          </div>
 
         </div>
+      )}
 
-        {/* MOBILE BOTTOM NAV */}
-        <nav className="lg:hidden fixed bottom-6 left-1/2 -translate-x-1/2 w-[95%] max-w-[400px] h-16 bg-white shadow-[0_10px_40px_rgba(0,0,0,0.1)] rounded-full border border-gray-100 flex justify-around items-center px-4 z-[100]">
-          <Link href="/" className="text-gray-400 hover:text-[#3a5b5e] transition-colors"><Wallet size={20} /></Link>
-          <Link href="/tracker" className="text-[#3a5b5e]"><Banknote size={24} className="bg-[#e0f2fe] p-1.5 rounded-xl" /></Link>
-          <Link href="/splitter" className="text-gray-400 hover:text-[#3a5b5e] transition-colors"><Calculator size={20} /></Link>
-          <Link href="/shop-clearing" className="text-gray-400 hover:text-[#3a5b5e] transition-colors"><ShoppingCart size={20} /></Link>
-          <Link href="/analytics" className="text-gray-400 hover:text-[#3a5b5e] transition-colors"><PieChart size={20} /></Link>
-        </nav>
-      </div>
-    </main>
+    </div>
   );
 }

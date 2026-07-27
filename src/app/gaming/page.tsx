@@ -4,9 +4,8 @@ import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import { 
   Gamepad2, Plus, Trash2, Trophy, Users, Shield, Award, 
-  ChevronLeft, LayoutDashboard, Banknote, Calculator, ShoppingCart, Flame, User, CheckCircle2, AlertCircle, RefreshCw, X, Wallet, Spade, Dices, Sparkles, Layers, Search, Star, Pencil
+  ChevronLeft, CheckCircle2, AlertCircle, X, Spade, Sparkles, Search, Star, Pencil, UserPlus, Flame as FireIcon, Users2, User, Hash, Calendar, Clock
 } from "lucide-react";
-import Link from "next/link";
 
 interface MasterMember {
   id: string;
@@ -39,16 +38,18 @@ interface Competition {
   title: string;
   game_type: string;
   status: string;
+  created_at?: string;
   participants: TournamentParticipant[];
   matches: Match[];
 }
 
-// Casual Game Types (e.g. Digu)
+// Casual Game Types (Digu, 10, Bondi)
 interface CasualPlayer {
   id: string;
   session_id: string;
   player_name: string;
   master_member_id?: string;
+  team_number?: number;
 }
 
 interface CasualRoundScore {
@@ -64,7 +65,9 @@ interface CasualSession {
   id: string;
   session_name: string;
   game_title: string;
+  play_mode?: 'solo' | 'duo';
   target_rounds: number;
+  created_at?: string;
   players: CasualPlayer[];
   rounds: CasualRoundScore[];
 }
@@ -91,11 +94,13 @@ export default function GamingPage() {
 
   // Casual Session Form States
   const [casualName, setCasualName] = useState("");
+  const [playMode, setPlayMode] = useState<'solo' | 'duo'>('solo');
   const [targetRoundsInput, setTargetRoundsInput] = useState("5");
 
-  // Live Master Member Search State
+  // Add Player Pop-over State
+  const [isAddPlayerModalOpen, setIsAddPlayerModalOpen] = useState(false);
   const [playerSearchQuery, setPlayerSearchQuery] = useState("");
-  const [customPlayerName, setCustomPlayerName] = useState("");
+  const [selectedTeamNumber, setSelectedTeamNumber] = useState<number>(1);
 
   // Log Tournament Match Form
   const [p1Name, setP1Name] = useState("");
@@ -124,6 +129,12 @@ export default function GamingPage() {
   const showToast = (message: string, type: 'success' | 'error' = 'success') => {
     setToast({ message, type });
     setTimeout(() => setToast(null), 4000);
+  };
+
+  const formatDate = (dateStr?: string) => {
+    if (!dateStr) return new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+    const d = new Date(dateStr);
+    return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
   };
 
   const fetchMasterMembers = async () => {
@@ -164,6 +175,7 @@ export default function GamingPage() {
         ]);
         return {
           ...s,
+          play_mode: s.play_mode || 'solo',
           target_rounds: s.target_rounds || 5,
           players: pRes.data || [],
           rounds: rRes.data || []
@@ -183,7 +195,7 @@ export default function GamingPage() {
   const currentComp = competitions.find(c => c.id === selectedCompId);
   const currentCasual = casualSessions.find(s => s.id === selectedCasualId);
 
-  // --- Handlers for Tournaments ---
+  // --- Handlers ---
   const handleCreateCompetition = async () => {
     if (!compTitle.trim()) return showToast("Enter competition name", "error");
 
@@ -229,8 +241,8 @@ export default function GamingPage() {
 
     if (!error) {
       setPlayerSearchQuery("");
-      setCustomPlayerName("");
       showToast(`${nameToAdd} added!`);
+      setIsAddPlayerModalOpen(false);
       fetchCompetitions();
     }
   };
@@ -292,7 +304,7 @@ export default function GamingPage() {
     fetchCompetitions();
   };
 
-  // --- Handlers for Casual Sessions (Digu) ---
+  // --- Handlers for Casual Sessions (Digu, 10, Bondi) ---
   const handleCreateCasualSession = async () => {
     if (!casualName.trim()) return showToast("Enter session name", "error");
     const category = selectedCasualCategory || "Digu";
@@ -301,6 +313,7 @@ export default function GamingPage() {
     const { data, error } = await supabase.from('casual_game_sessions').insert({
       session_name: casualName.trim(),
       game_title: category,
+      play_mode: playMode,
       target_rounds: roundsTarget
     }).select().single();
 
@@ -330,16 +343,22 @@ export default function GamingPage() {
     const isAlready = currentCasual.players.some(p => p.player_name.toLowerCase() === nameToAdd.toLowerCase());
     if (isAlready) return showToast("Player already in game", "error");
 
-    const { error } = await supabase.from('casual_game_players').insert({
+    const payload: any = {
       session_id: currentCasual.id,
       player_name: nameToAdd,
       master_member_id: masterId || null
-    });
+    };
+
+    if (currentCasual.play_mode === 'duo') {
+      payload.team_number = selectedTeamNumber;
+    }
+
+    const { error } = await supabase.from('casual_game_players').insert(payload);
 
     if (!error) {
       setPlayerSearchQuery("");
-      setCustomPlayerName("");
       showToast(`${nameToAdd} joined!`);
+      setIsAddPlayerModalOpen(false);
       fetchCasualSessions();
     }
   };
@@ -347,6 +366,26 @@ export default function GamingPage() {
   const handleRemoveCasualPlayer = async (pId: string) => {
     await supabase.from('casual_game_players').delete().eq('id', pId);
     fetchCasualSessions();
+  };
+
+  const handleScoreInputChange = (playerId: string, val: string) => {
+    if (!currentCasual) return;
+
+    if (currentCasual.play_mode === 'duo') {
+      const activePlayer = currentCasual.players.find(p => p.id === playerId);
+      const teamNum = activePlayer?.team_number || 1;
+      const teammates = currentCasual.players.filter(p => (p.team_number || 1) === teamNum);
+
+      setRoundScoresInput(prev => {
+        const next = { ...prev };
+        teammates.forEach(tm => {
+          next[tm.id] = val;
+        });
+        return next;
+      });
+    } else {
+      setRoundScoresInput(prev => ({ ...prev, [playerId]: val }));
+    }
   };
 
   const handleSaveCasualRoundScores = async () => {
@@ -373,7 +412,7 @@ export default function GamingPage() {
       showToast(`Round ${nextRoundNum} saved!`);
       fetchCasualSessions();
     } else {
-      showToast(`Error: ${error.message}`, "error");
+      showToast(`Error saving round: ${error.message}`, "error");
     }
   };
 
@@ -449,7 +488,6 @@ export default function GamingPage() {
     return currentCasual.rounds.filter(r => r.player_id === playerId && r.is_gin).length;
   };
 
-  // Rank players by total cumulative score
   const getRankedCasualPlayers = () => {
     if (!currentCasual) return [];
     return [...currentCasual.players].map(p => ({
@@ -459,11 +497,68 @@ export default function GamingPage() {
     })).sort((a, b) => b.totalScore - a.totalScore);
   };
 
+  // --- CAREER STATS CALCULATION ---
+  const calculateTopCareerStats = () => {
+    const playerStatsMap: Record<string, { name: string; matches: number; totalScore: number; maxSingleGame: number; ginCount: number }> = {};
+
+    casualSessions.forEach(s => {
+      s.players.forEach(p => {
+        if (!playerStatsMap[p.player_name]) {
+          playerStatsMap[p.player_name] = { name: p.player_name, matches: 0, totalScore: 0, maxSingleGame: 0, ginCount: 0 };
+        }
+
+        const pRounds = s.rounds.filter(r => r.player_id === p.id);
+        const matchTotal = pRounds.reduce((sum, r) => sum + (parseFloat(r.score as any) || 0), 0);
+        const matchGins = pRounds.filter(r => r.is_gin).length;
+
+        playerStatsMap[p.player_name].matches += 1;
+        playerStatsMap[p.player_name].totalScore += matchTotal;
+        playerStatsMap[p.player_name].ginCount += matchGins;
+        if (matchTotal > playerStatsMap[p.player_name].maxSingleGame) {
+          playerStatsMap[p.player_name].maxSingleGame = matchTotal;
+        }
+      });
+    });
+
+    const statsArray = Object.values(playerStatsMap);
+
+    const mostPlayed = [...statsArray].sort((a, b) => b.matches - a.matches)[0];
+    const highestTotalScore = [...statsArray].sort((a, b) => b.totalScore - a.totalScore)[0];
+    const highestSingleMatch = [...statsArray].sort((a, b) => b.maxSingleGame - a.maxSingleGame)[0];
+    const mostGins = [...statsArray].sort((a, b) => b.ginCount - a.ginCount)[0];
+
+    return {
+      mostPlayed: mostPlayed ? { name: mostPlayed.name, val: `${mostPlayed.matches} games` } : { name: "N/A", val: "0" },
+      highestTotalScore: highestTotalScore ? { name: highestTotalScore.name, val: `${highestTotalScore.totalScore} pts` } : { name: "N/A", val: "0" },
+      highestSingleMatch: highestSingleMatch ? { name: highestSingleMatch.name, val: `${highestSingleMatch.maxSingleGame} pts` } : { name: "N/A", val: "0" },
+      mostGins: mostGins ? { name: mostGins.name, val: `${mostGins.ginCount} Gins` } : { name: "N/A", val: "0" }
+    };
+  };
+
+  const careerStats = calculateTopCareerStats();
+
   const casualGameCategories = [
-    { title: "Digu", icon: Spade, bg: "bg-indigo-50 border-indigo-200 text-indigo-700" },
-    { title: "Uno", icon: Layers, bg: "bg-amber-50 border-amber-200 text-amber-700" },
-    { title: "Poker", icon: Sparkles, bg: "bg-rose-50 border-rose-200 text-rose-700" },
-    { title: "Carrom", icon: Dices, bg: "bg-emerald-50 border-emerald-200 text-emerald-700" }
+    { 
+      title: "Digu", 
+      icon: Spade, 
+      badge: "Card Classic",
+      desc: "Solo & Duo 2v2 Team Scoring",
+      gradient: "from-slate-900 via-indigo-950 to-slate-900 border-indigo-500/30 text-white" 
+    },
+    { 
+      title: "10", 
+      icon: Hash, 
+      badge: "Points Match",
+      desc: "10-Points Card Game",
+      gradient: "from-slate-900 via-amber-950 to-slate-900 border-amber-500/30 text-white" 
+    },
+    { 
+      title: "Bondi", 
+      icon: Sparkles, 
+      badge: "Round Game",
+      desc: "Classic Round Points Tracker",
+      gradient: "from-slate-900 via-emerald-950 to-slate-900 border-emerald-500/30 text-white" 
+    }
   ];
 
   const currentRoundsPlayed = currentCasual?.rounds.length 
@@ -472,7 +567,7 @@ export default function GamingPage() {
   const isGameOver = currentCasual ? currentRoundsPlayed >= (currentCasual.target_rounds || 5) : false;
 
   return (
-    <main className="min-h-screen bg-[#F8FAFC] text-[#1E293B] font-sans antialiased flex relative overflow-x-hidden">
+    <div className="w-full max-w-7xl mx-auto px-2 sm:px-6 lg:px-8 py-3 sm:py-8 pb-28">
       
       {/* Toast Notification */}
       {toast && (
@@ -482,30 +577,106 @@ export default function GamingPage() {
         </div>
       )}
 
+      {/* ADD PLAYER MODAL */}
+      {isAddPlayerModalOpen && (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs z-1000 flex items-center justify-center p-3 sm:p-4">
+          <div className="bg-white rounded-2xl border border-slate-200 p-4 max-w-sm w-full shadow-2xl space-y-3">
+            <div className="flex justify-between items-center border-b border-slate-100 pb-2">
+              <h3 className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+                <UserPlus size={15} className="text-indigo-600"/> Add Session Player
+              </h3>
+              <button onClick={() => setIsAddPlayerModalOpen(false)} className="text-slate-400 p-1"><X size={16}/></button>
+            </div>
+
+            {currentCasual?.play_mode === 'duo' && (
+              <div className="bg-slate-50 border border-slate-200 p-2 rounded-xl flex items-center justify-between">
+                <span className="text-xs font-bold text-slate-700">Assign to Team:</span>
+                <div className="flex items-center gap-1">
+                  <button 
+                    onClick={() => setSelectedTeamNumber(1)}
+                    className={`px-3 py-1 rounded-lg text-xs font-extrabold transition-colors ${selectedTeamNumber === 1 ? 'bg-indigo-600 text-white' : 'bg-white border text-slate-600'}`}
+                  >
+                    Team 1
+                  </button>
+                  <button 
+                    onClick={() => setSelectedTeamNumber(2)}
+                    className={`px-3 py-1 rounded-lg text-xs font-extrabold transition-colors ${selectedTeamNumber === 2 ? 'bg-amber-600 text-white' : 'bg-white border text-slate-600'}`}
+                  >
+                    Team 2
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <div className="relative">
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/>
+              <input 
+                type="text" 
+                placeholder="Search Master Directory or type name..." 
+                value={playerSearchQuery}
+                onChange={(e) => setPlayerSearchQuery(e.target.value)}
+                className="w-full bg-slate-50 border border-slate-200 pl-9 pr-3 py-2 rounded-xl text-xs font-bold text-slate-800 focus:outline-none"
+              />
+            </div>
+
+            <div className="bg-slate-50 border border-slate-200 rounded-xl p-2 max-h-48 overflow-y-auto space-y-1">
+              {masterMembers
+                .filter(m => m.full_name.toLowerCase().includes(playerSearchQuery.toLowerCase()))
+                .map(m => (
+                  <button 
+                    key={m.id}
+                    onClick={() => {
+                      if (currentCasual) handleAddCasualPlayerName(m.full_name, m.id);
+                      else if (currentComp) handleAddPlayerToCompetitionName(m.full_name, m.id);
+                    }}
+                    className="w-full text-left px-2.5 py-1.5 rounded-lg bg-white hover:bg-indigo-50 text-xs font-bold text-slate-800 hover:text-indigo-600 transition-colors flex items-center justify-between"
+                  >
+                    <span>{m.full_name}</span>
+                    <span className="text-[9px] font-extrabold text-indigo-600 uppercase">+ Add</span>
+                  </button>
+                ))}
+
+              {playerSearchQuery.trim() !== "" && (
+                <button 
+                  onClick={() => {
+                    if (currentCasual) handleAddCasualPlayerName(playerSearchQuery.trim());
+                    else if (currentComp) handleAddPlayerToCompetitionName(playerSearchQuery.trim());
+                  }}
+                  className="w-full text-left px-2.5 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-bold flex items-center justify-between"
+                >
+                  <span>Add Custom: "{playerSearchQuery}"</span>
+                  <Plus size={13}/>
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* EDIT CASUAL ROUND MODAL */}
       {editRoundModal.isOpen && editRoundModal.roundNumber !== null && currentCasual && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs z-1000 flex items-center justify-center p-3 sm:p-4">
-          <div className="bg-white rounded-2xl border border-slate-200 p-4 sm:p-5 max-w-md w-full shadow-2xl space-y-4">
-            <div className="flex justify-between items-center border-b border-slate-100 pb-2.5">
-              <h3 className="text-xs sm:text-sm font-bold text-slate-900 flex items-center gap-1.5">
+          <div className="bg-white rounded-2xl border border-slate-200 p-4 max-w-sm w-full shadow-2xl space-y-3">
+            <div className="flex justify-between items-center border-b border-slate-100 pb-2">
+              <h3 className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
                 <Pencil size={15} className="text-indigo-600"/> Edit Round {editRoundModal.roundNumber} Scores
               </h3>
-              <button onClick={() => setEditMemberModal({ isOpen: false, roundNumber: null, scores: {}, ginId: null })} className="text-slate-400 hover:text-slate-800"><X size={16}/></button>
+              <button onClick={() => setEditMemberModal({ isOpen: false, roundNumber: null, scores: {}, ginId: null })} className="text-slate-400"><X size={16}/></button>
             </div>
 
-            <div className="space-y-2.5 max-h-60 overflow-y-auto pr-1">
+            <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
               {currentCasual.players.map(p => {
                 const isGin = editRoundModal.ginId === p.id;
                 return (
-                  <div key={p.id} className="bg-slate-50 border border-slate-200 p-2.5 rounded-xl flex items-center justify-between gap-2">
+                  <div key={p.id} className="bg-slate-50 border border-slate-200 p-2 rounded-xl flex items-center justify-between gap-2">
                     <span className="text-xs font-bold text-slate-800 truncate flex-1">{p.player_name}</span>
 
                     <button 
                       type="button"
                       onClick={() => setEditMemberModal(prev => ({ ...prev, ginId: isGin ? null : p.id }))}
-                      className={`p-1.5 rounded-lg border text-[10px] font-black flex items-center gap-1 transition-colors ${isGin ? 'bg-amber-400 text-slate-900 border-amber-400' : 'bg-white text-slate-400 border-slate-200'}`}
+                      className={`p-1 rounded text-[9px] font-black flex items-center gap-0.5 border ${isGin ? 'bg-amber-400 text-slate-900 border-amber-400' : 'bg-white text-slate-400 border-slate-200'}`}
                     >
-                      <Star size={12} className={isGin ? 'fill-slate-900' : ''}/> Gin
+                      <Star size={11} className={isGin ? 'fill-slate-900' : ''}/> Gin
                     </button>
 
                     <input 
@@ -518,7 +689,7 @@ export default function GamingPage() {
                           scores: { ...prev.scores, [p.id]: val }
                         }));
                       }}
-                      className="w-20 bg-white border border-slate-200 p-1.5 rounded-lg text-xs font-bold text-slate-900 focus:outline-none"
+                      className="w-16 bg-white border border-slate-200 p-1 rounded-lg text-xs font-bold text-slate-900 focus:outline-none"
                     />
                   </div>
                 );
@@ -528,305 +699,247 @@ export default function GamingPage() {
             <div className="flex gap-2 pt-2 border-t border-slate-100">
               <button 
                 onClick={() => setEditMemberModal({ isOpen: false, roundNumber: null, scores: {}, ginId: null })} 
-                className="flex-1 py-2 bg-slate-100 text-slate-600 font-bold text-xs rounded-xl hover:bg-slate-200 transition-colors"
+                className="flex-1 py-2 bg-slate-100 text-slate-600 font-bold text-xs rounded-xl"
               >
                 Cancel
               </button>
               <button 
                 onClick={handleSaveEditedRound} 
-                className="flex-1 py-2 bg-slate-900 text-white font-bold text-xs rounded-xl hover:bg-slate-800 transition-colors"
+                className="flex-1 py-2 bg-slate-900 text-white font-bold text-xs rounded-xl"
               >
-                Save Round
+                Save
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* PC DESKTOP NAVIGATION DOCK */}
-      <aside className="hidden lg:flex w-72 bg-white border-r border-slate-200/80 flex-col p-6 sticky top-0 h-screen shrink-0 z-40">
-        <div className="flex items-center gap-3 mb-10 px-2">
-          <div className="w-9 h-9 rounded-xl bg-slate-900 flex items-center justify-center text-white font-black shadow-md">L</div>
-          <div>
-            <h1 className="text-base font-bold tracking-tight text-slate-900 leading-none">Lextrack</h1>
-            <p className="text-[9px] font-bold uppercase tracking-[0.12em] text-slate-400 mt-1">LexCorp System</p>
+      {selectedCompId === null && selectedCasualId === null ? (
+        // ==========================================
+        // MAIN GAMING HUB DASHBOARD VIEW
+        // ==========================================
+        <div className="space-y-5 animate-in fade-in duration-300">
+          <header className="flex flex-col sm:flex-row justify-between sm:items-center gap-3">
+            <div>
+              <h2 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900 flex items-center gap-2">
+                <Gamepad2 size={22} className="text-indigo-600"/> Gaming Scorekeeper Hub
+              </h2>
+            </div>
+
+            <div className="flex items-center gap-1 bg-white border border-slate-200 p-1 rounded-xl shadow-xs w-fit">
+              <button 
+                onClick={() => { setHubTab('casual'); setSelectedCasualCategory(null); }}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold uppercase tracking-wider transition-colors ${hubTab === 'casual' ? 'bg-slate-900 text-white shadow-xs' : 'text-slate-500'}`}
+              >
+                🃏 Casual Cards
+              </button>
+              <button 
+                onClick={() => { setHubTab('tournaments'); setSelectedCasualCategory(null); }}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold uppercase tracking-wider transition-colors ${hubTab === 'tournaments' ? 'bg-slate-900 text-white shadow-xs' : 'text-slate-500'}`}
+              >
+                🏆 Tournaments
+              </button>
+            </div>
+          </header>
+
+          {/* ALL-TIME CAREER STATISTICS INSIGHTS */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5">
+            <div className="bg-white border border-slate-200/80 p-3 rounded-2xl shadow-xs">
+              <span className="text-[9px] font-extrabold uppercase text-slate-400 tracking-wider flex items-center gap-1">
+                <Gamepad2 size={11} className="text-indigo-600"/> Most Played
+              </span>
+              <p className="text-xs font-black text-slate-900 truncate mt-1">{careerStats.mostPlayed.name}</p>
+              <span className="text-[10px] font-bold text-indigo-600">{careerStats.mostPlayed.val}</span>
+            </div>
+
+            <div className="bg-white border border-slate-200/80 p-3 rounded-2xl shadow-xs">
+              <span className="text-[9px] font-extrabold uppercase text-slate-400 tracking-wider flex items-center gap-1">
+                <Trophy size={11} className="text-amber-500"/> Most Points
+              </span>
+              <p className="text-xs font-black text-slate-900 truncate mt-1">{careerStats.highestTotalScore.name}</p>
+              <span className="text-[10px] font-bold text-amber-600">{careerStats.highestTotalScore.val}</span>
+            </div>
+
+            <div className="bg-white border border-slate-200/80 p-3 rounded-2xl shadow-xs">
+              <span className="text-[9px] font-extrabold uppercase text-slate-400 tracking-wider flex items-center gap-1">
+                <FireIcon size={11} className="text-rose-500"/> Single Game Record
+              </span>
+              <p className="text-xs font-black text-slate-900 truncate mt-1">{careerStats.highestSingleMatch.name}</p>
+              <span className="text-[10px] font-bold text-rose-600">{careerStats.highestSingleMatch.val}</span>
+            </div>
+
+            <div className="bg-white border border-slate-200/80 p-3 rounded-2xl shadow-xs">
+              <span className="text-[9px] font-extrabold uppercase text-slate-400 tracking-wider flex items-center gap-1">
+                <Star size={11} className="fill-amber-400 text-amber-500"/> Most Gins
+              </span>
+              <p className="text-xs font-black text-slate-900 truncate mt-1">{careerStats.mostGins.name}</p>
+              <span className="text-[10px] font-bold text-amber-600">{careerStats.mostGins.val}</span>
+            </div>
           </div>
-        </div>
-        <nav className="space-y-1 grow">
-          <Link href="/" className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium hover:bg-slate-50 text-slate-500 hover:text-slate-900 transition-all"><LayoutDashboard size={18}/> Dashboard</Link>
-          <Link href="/tracker" className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium hover:bg-slate-50 text-slate-500 hover:text-slate-900 transition-all"><Banknote size={18}/> Tracker</Link>
-          <Link href="/splitter" className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium hover:bg-slate-50 text-slate-500 hover:text-slate-900 transition-all"><Calculator size={18}/> Splitter</Link>
-          <Link href="/shop-clearing" className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium hover:bg-slate-50 text-slate-500 hover:text-slate-900 transition-all"><ShoppingCart size={18}/> Clearing</Link>
-          <Link href="/activities" className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium hover:bg-slate-50 text-slate-500 hover:text-slate-900 transition-all"><Flame size={18}/> Activities</Link>
-          <button onClick={() => { setSelectedCompId(null); setSelectedCasualId(null); setSelectedCasualCategory(null); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold transition-all ${!selectedCompId && !selectedCasualId ? 'bg-slate-900 text-white shadow-sm' : 'hover:bg-slate-50 text-slate-500'}`}><Gamepad2 size={18}/> Gaming Hub</button>
-          <Link href="/myself" className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium hover:bg-slate-50 text-slate-500 hover:text-slate-900 transition-all"><User size={18}/> Myself</Link>
-        </nav>
-      </aside>
 
-      {/* CORE VIEWPORT */}
-      <div className="grow flex flex-col min-h-screen overflow-y-auto w-full min-w-0">
-        <div className="w-full max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-8 pb-32">
-          
-          {selectedCompId === null && selectedCasualId === null ? (
-            // ==========================================
-            // MAIN GAMING HUB DASHBOARD VIEW
-            // ==========================================
-            <div className="space-y-6 sm:space-y-8 animate-in fade-in duration-300">
-              <header className="flex flex-col sm:flex-row justify-between sm:items-center gap-4">
-                <div>
-                  <h2 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900 flex items-center gap-2">
-                    <Gamepad2 size={24} className="text-indigo-600"/> Gaming & Scorekeeper Hub
-                  </h2>
-                  <p className="text-xs font-semibold text-slate-500 mt-1">Select between casual game scorekeeping or competitive tournaments.</p>
-                </div>
+          {/* CASUAL PLAY VIEW */}
+          {hubTab === 'casual' && (
+            <div className="space-y-4">
+              {selectedCasualCategory === null ? (
+                // GAME CATEGORY BLOCKS SELECTION SCREEN
+                <div className="space-y-3">
+                  <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wider flex items-center gap-1.5">
+                    <Spade size={15} className="text-indigo-600"/> Choose Game Type
+                  </h3>
 
-                <div className="flex items-center gap-1 bg-white border border-slate-200 p-1 rounded-xl shadow-xs w-fit">
-                  <button 
-                    onClick={() => { setHubTab('casual'); setSelectedCasualCategory(null); }}
-                    className={`px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-wider transition-colors ${hubTab === 'casual' ? 'bg-slate-900 text-white shadow-xs' : 'text-slate-500 hover:text-slate-900'}`}
-                  >
-                    🃏 Casual Play
-                  </button>
-                  <button 
-                    onClick={() => { setHubTab('tournaments'); setSelectedCasualCategory(null); }}
-                    className={`px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-wider transition-colors ${hubTab === 'tournaments' ? 'bg-slate-900 text-white shadow-xs' : 'text-slate-500 hover:text-slate-900'}`}
-                  >
-                    🏆 Tournaments
-                  </button>
-                </div>
-              </header>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
+                    {casualGameCategories.map((cat, idx) => {
+                      const IconComponent = cat.icon;
+                      const categorySessions = casualSessions.filter(s => s.game_title === cat.title);
 
-              {/* OVERALL STATS BANNERS */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
-                <div className="bg-white border border-slate-200/80 p-4 rounded-2xl shadow-xs">
-                  <span className="text-[9px] font-extrabold uppercase text-slate-400 tracking-wider">Casual Sessions Logged</span>
-                  <p className="text-xl sm:text-2xl font-black text-slate-900 mt-1">{casualSessions.length}</p>
-                </div>
-                <div className="bg-white border border-slate-200/80 p-4 rounded-2xl shadow-xs">
-                  <span className="text-[9px] font-extrabold uppercase text-slate-400 tracking-wider">Active Tournaments</span>
-                  <p className="text-xl sm:text-2xl font-black text-indigo-600 mt-1">{competitions.length}</p>
-                </div>
-                <div className="bg-white border border-slate-200/80 p-4 rounded-2xl shadow-xs">
-                  <span className="text-[9px] font-extrabold uppercase text-slate-400 tracking-wider">Saved Directory Players</span>
-                  <p className="text-xl sm:text-2xl font-black text-amber-600 mt-1">{masterMembers.length}</p>
-                </div>
-              </div>
+                      return (
+                        <div 
+                          key={idx}
+                          onClick={() => setSelectedCasualCategory(cat.title)}
+                          className={`bg-gradient-to-r ${cat.gradient} p-4 sm:p-5 rounded-2xl border shadow-md hover:shadow-lg transition-all cursor-pointer group flex flex-col justify-between relative overflow-hidden`}
+                        >
+                          <div className="absolute right-2 bottom-0 opacity-10 pointer-events-none">
+                            <IconComponent size={110} />
+                          </div>
 
-              {/* TAB 1: CASUAL PLAY */}
-              {hubTab === 'casual' && (
-                <div className="space-y-6">
-                  {selectedCasualCategory === null ? (
-                    <div className="space-y-4">
-                      <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider flex items-center gap-2">
-                        <Spade size={16} className="text-indigo-600"/> Select Casual Game Type
-                      </h3>
+                          <div className="relative z-10 space-y-2">
+                            <div className="flex justify-between items-center">
+                              <span className="text-[8px] font-black uppercase tracking-widest px-2 py-0.5 rounded bg-white/10 border border-white/10 text-white">
+                                {cat.badge}
+                              </span>
+                              <span className="text-[10px] font-bold text-slate-300">
+                                {categorySessions.length} active
+                              </span>
+                            </div>
 
-                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                        {casualGameCategories.map((cat, idx) => {
-                          const IconComponent = cat.icon;
-                          const categorySessions = casualSessions.filter(s => s.game_title === cat.title);
-
-                          return (
-                            <div 
-                              key={idx}
-                              onClick={() => setSelectedCasualCategory(cat.title)}
-                              className="bg-white border border-slate-200/80 rounded-2xl p-5 shadow-xs hover:shadow-md hover:border-slate-300 transition-all cursor-pointer group flex flex-col justify-between"
-                            >
-                              <div>
-                                <div className={`w-10 h-10 rounded-xl flex items-center justify-center border ${cat.bg} mb-3 group-hover:scale-105 transition-transform`}>
-                                  <IconComponent size={20}/>
-                                </div>
-                                <h4 className="font-black text-slate-900 text-base">{cat.title}</h4>
+                            <div className="flex items-center gap-2 pt-1">
+                              <div className="w-8 h-8 rounded-xl bg-white/10 backdrop-blur-md flex items-center justify-center border border-white/20">
+                                <IconComponent size={18} className="text-white"/>
                               </div>
-
-                              <div className="border-t border-slate-100 pt-3 mt-4 flex justify-between items-center text-[10px] font-bold text-slate-500">
-                                <span>Sessions: <b className="text-slate-800">{categorySessions.length}</b></span>
-                                <span className="text-indigo-600 group-hover:translate-x-0.5 transition-transform">Open →</span>
+                              <div>
+                                <h4 className="font-black text-white text-base sm:text-lg leading-tight">{cat.title}</h4>
+                                <p className="text-[10px] font-medium text-slate-300">{cat.desc}</p>
                               </div>
                             </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  ) : (
-                    // INSIDE SPECIFIC GAME CATEGORY (e.g. Digu)
-                    <div className="space-y-6">
-                      <div className="flex justify-between items-center border-b border-slate-200 pb-3">
-                        <button 
-                          onClick={() => setSelectedCasualCategory(null)}
-                          className="text-xs font-bold text-slate-500 hover:text-slate-900 flex items-center gap-1 uppercase tracking-wider"
-                        >
-                          <ChevronLeft size={14}/> Back to Categories
-                        </button>
-                        <span className="text-xs font-black uppercase text-indigo-600 bg-indigo-50 px-3 py-1 rounded-lg border border-indigo-100">
-                          {selectedCasualCategory} Mode
-                        </span>
-                      </div>
-
-                      {/* CREATE SESSION WITH TARGET ROUNDS */}
-                      <div className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200/80 shadow-xs flex flex-col sm:flex-row gap-3 items-stretch sm:items-end">
-                        <div className="grow">
-                          <label className="text-[9px] font-bold uppercase tracking-wider text-slate-400 mb-1 block">
-                            Session Title
-                          </label>
-                          <input 
-                            type="text" 
-                            placeholder={`e.g. Friday ${selectedCasualCategory} Match`} 
-                            value={casualName} 
-                            onChange={(e) => setCasualName(e.target.value)} 
-                            className="w-full bg-slate-50 border border-slate-200 p-2.5 rounded-xl text-xs font-bold text-slate-800 focus:outline-none"
-                          />
-                        </div>
-
-                        <div className="w-full sm:w-36">
-                          <label className="text-[9px] font-bold uppercase tracking-wider text-slate-400 mb-1 block">Total Rounds</label>
-                          <input 
-                            type="number" 
-                            value={targetRoundsInput} 
-                            onChange={(e) => setTargetRoundsInput(e.target.value)} 
-                            className="w-full bg-slate-50 border border-slate-200 p-2.5 rounded-xl text-xs font-bold text-slate-800 focus:outline-none"
-                            placeholder="5"
-                          />
-                        </div>
-
-                        <button 
-                          onClick={handleCreateCasualSession}
-                          className="h-10 px-5 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs uppercase tracking-wider rounded-xl shadow-xs transition-transform active:scale-95 flex items-center justify-center gap-1.5 shrink-0"
-                        >
-                          <Plus size={15}/> Start {selectedCasualCategory}
-                        </button>
-                      </div>
-
-                      {/* ACTIVE SESSIONS FOR THIS GAME CATEGORY */}
-                      <div>
-                        <h3 className="text-sm font-bold text-slate-900 mb-3 flex items-center gap-2">
-                          <Gamepad2 size={16} className="text-indigo-600"/> Saved {selectedCasualCategory} Sessions
-                        </h3>
-
-                        {casualSessions.filter(s => s.game_title === selectedCasualCategory).length === 0 ? (
-                          <div className="text-center py-12 bg-white rounded-2xl border border-dashed border-slate-200 text-slate-400 font-semibold text-xs shadow-xs">
-                            No active {selectedCasualCategory} sessions found. Start a new session above!
                           </div>
-                        ) : (
-                          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5 sm:gap-4">
-                            {casualSessions.filter(s => s.game_title === selectedCasualCategory).map((s: CasualSession) => {
-                              const roundsCount = s.rounds.length > 0 ? Math.max(...s.rounds.map(r => r.round_number)) : 0;
-                              return (
-                                <div 
-                                  key={s.id}
-                                  onClick={() => setSelectedCasualId(s.id)}
-                                  className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200/80 shadow-xs hover:shadow-md transition-all cursor-pointer group flex flex-col relative"
-                                >
-                                  <div className="flex justify-between items-start mb-3 pr-6">
-                                    <div>
-                                      <h4 className="font-extrabold text-slate-900 group-hover:text-indigo-600 transition-colors text-sm sm:text-base">{s.session_name}</h4>
-                                    </div>
-                                  </div>
 
-                                  <button 
-                                    onClick={(e) => handleDeleteCasualSession(s.id, e)}
-                                    className="absolute top-3.5 right-3 text-slate-300 hover:text-rose-500 p-1 rounded-lg"
-                                  >
-                                    <Trash2 size={14}/>
-                                  </button>
-
-                                  <div className="mt-auto grid grid-cols-2 gap-2 border-t border-slate-100 pt-3 text-[10px] font-bold text-slate-500">
-                                    <div>Players: <b className="text-slate-800">{s.players.length}</b></div>
-                                    <div>Progress: <b className="text-slate-800">{roundsCount} / {s.target_rounds || 5} Rounds</b></div>
-                                  </div>
-                                </div>
-                              );
-                            })}
+                          <div className="relative z-10 mt-4 border-t border-white/10 pt-2.5 flex justify-between items-center text-[10px] font-bold text-indigo-300">
+                            <span>Open & Play</span>
+                            <span className="group-hover:translate-x-1 transition-transform">→</span>
                           </div>
-                        )}
-                      </div>
-                    </div>
-                  )}
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
-              )}
+              ) : (
+                // INSIDE SPECIFIC GAME CATEGORY
+                <div className="space-y-4">
+                  <div className="flex justify-between items-center border-b border-slate-200 pb-2">
+                    <button 
+                      onClick={() => setSelectedCasualCategory(null)}
+                      className="text-xs font-bold text-slate-500 hover:text-slate-900 flex items-center gap-1 uppercase tracking-wider"
+                    >
+                      <ChevronLeft size={14}/> Back to Game Categories
+                    </button>
+                    <span className="text-xs font-black uppercase text-indigo-600 bg-indigo-50 px-2.5 py-0.5 rounded-lg border border-indigo-100">
+                      {selectedCasualCategory} Mode
+                    </span>
+                  </div>
 
-              {/* TAB 2: TOURNAMENTS */}
-              {hubTab === 'tournaments' && (
-                <div className="space-y-6">
-                  <div className="bg-white rounded-2xl p-3.5 sm:p-5 border border-slate-200/80 shadow-xs flex flex-col sm:flex-row gap-3 items-stretch sm:items-end">
-                    <div className="grow">
-                      <label className="text-[9px] font-bold uppercase tracking-wider text-slate-400 mb-1 block">Tournament Title</label>
+                  {/* CREATE SESSION WITH MODE & TARGET ROUNDS */}
+                  <div className="bg-white rounded-2xl p-3 sm:p-4 border border-slate-200 shadow-xs space-y-3">
+                    <span className="text-[10px] font-bold uppercase text-slate-400 block">Initialize New {selectedCasualCategory} Match</span>
+                    
+                    <div className="grid grid-cols-1 sm:grid-cols-12 gap-2">
                       <input 
                         type="text" 
-                        placeholder="e.g. Resort FIFA Championship, Friday Badminton Cup" 
-                        value={compTitle} 
-                        onChange={(e) => setCompTitle(e.target.value)} 
-                        className="w-full bg-slate-50 border border-slate-200 p-2.5 rounded-xl text-xs font-bold text-slate-800 focus:outline-none"
+                        placeholder={`Session Name (e.g. Friday ${selectedCasualCategory})`} 
+                        value={casualName} 
+                        onChange={(e) => setCasualName(e.target.value)} 
+                        className="sm:col-span-6 bg-slate-50 border border-slate-200 p-2 rounded-xl text-xs font-bold text-slate-800 focus:outline-none"
+                      />
+
+                      {/* SOLO vs DUO TOGGLE */}
+                      <div className="sm:col-span-3 flex items-center gap-1 bg-slate-50 p-1 rounded-xl border border-slate-200">
+                        <button 
+                          type="button"
+                          onClick={() => setPlayMode('solo')}
+                          className={`flex-1 py-1 rounded-lg text-[10px] font-black uppercase flex items-center justify-center gap-0.5 transition-colors ${playMode === 'solo' ? 'bg-indigo-600 text-white' : 'text-slate-500'}`}
+                        >
+                          <User size={11}/> Solo
+                        </button>
+                        <button 
+                          type="button"
+                          onClick={() => setPlayMode('duo')}
+                          className={`flex-1 py-1 rounded-lg text-[10px] font-black uppercase flex items-center justify-center gap-0.5 transition-colors ${playMode === 'duo' ? 'bg-indigo-600 text-white' : 'text-slate-500'}`}
+                        >
+                          <Users2 size={11}/> Duo
+                        </button>
+                      </div>
+
+                      <input 
+                        type="number" 
+                        value={targetRoundsInput} 
+                        onChange={(e) => setTargetRoundsInput(e.target.value)} 
+                        className="sm:col-span-3 bg-slate-50 border border-slate-200 p-2 rounded-xl text-xs font-bold text-slate-800 text-center focus:outline-none"
+                        placeholder="5 Rounds"
                       />
                     </div>
 
-                    <div className="w-full sm:w-48">
-                      <label className="text-[9px] font-bold uppercase tracking-wider text-slate-400 mb-1 block">Game Category</label>
-                      <select 
-                        value={gameType} 
-                        onChange={(e) => setGameType(e.target.value)} 
-                        className="w-full bg-slate-50 border border-slate-200 p-2.5 rounded-xl text-xs font-bold text-slate-700 focus:outline-none"
-                      >
-                        <option value="FIFA / PS">🎮 FIFA / Console</option>
-                        <option value="Badminton">🏸 Badminton</option>
-                        <option value="Cards / Uno">🃏 Cards / Uno</option>
-                        <option value="Board Game">🎲 Board Games</option>
-                        <option value="Carrom">⚪ Carrom</option>
-                        <option value="General">🏆 General Sports</option>
-                      </select>
-                    </div>
-
                     <button 
-                      onClick={handleCreateCompetition}
-                      className="h-10 px-5 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs uppercase tracking-wider rounded-xl shadow-xs transition-transform active:scale-95 flex items-center justify-center gap-1.5 shrink-0"
+                      onClick={handleCreateCasualSession}
+                      className="w-full h-9 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs uppercase tracking-wider rounded-xl shadow-xs transition-transform active:scale-95 flex items-center justify-center gap-1.5"
                     >
-                      <Plus size={15}/> Create Tournament
+                      <Plus size={14}/> Start {selectedCasualCategory} ({playMode === 'duo' ? '2v2 Duo' : 'Solo'})
                     </button>
                   </div>
 
-                  <div>
-                    <h3 className="text-sm font-bold text-slate-900 mb-3 flex items-center gap-2"><Trophy size={16} className="text-amber-500"/> Active Tournaments</h3>
-                    {competitions.length === 0 ? (
-                      <div className="text-center py-16 bg-white rounded-2xl border border-dashed border-slate-200 text-slate-400 font-semibold text-xs shadow-xs">
-                        No tournaments active. Create your first game session above!
+                  {/* ACTIVE SESSIONS FOR THIS GAME WITH AUTOMATIC DATE DISPLAY */}
+                  <div className="space-y-2">
+                    <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wider flex items-center gap-1.5">
+                      <Gamepad2 size={14} className="text-indigo-600"/> Saved {selectedCasualCategory} Sessions
+                    </h3>
+
+                    {casualSessions.filter(s => s.game_title === selectedCasualCategory).length === 0 ? (
+                      <div className="text-center py-10 bg-white rounded-2xl border border-dashed border-slate-200 text-slate-400 font-semibold text-xs">
+                        No active {selectedCasualCategory} sessions found. Create one above!
                       </div>
                     ) : (
-                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5 sm:gap-4">
-                        {competitions.map((c: Competition) => {
-                          const topPlayer = c.participants[0];
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                        {casualSessions.filter(s => s.game_title === selectedCasualCategory).map((s: CasualSession) => {
+                          const roundsCount = s.rounds.length > 0 ? Math.max(...s.rounds.map(r => r.round_number)) : 0;
                           return (
                             <div 
-                              key={c.id}
-                              onClick={() => setSelectedCompId(c.id)}
-                              className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200/80 shadow-xs hover:shadow-md transition-all cursor-pointer group flex flex-col relative"
+                              key={s.id}
+                              onClick={() => setSelectedCasualId(s.id)}
+                              className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-xs hover:border-slate-300 cursor-pointer flex flex-col relative"
                             >
-                              <div className="flex justify-between items-start mb-3 pr-6">
+                              <div className="flex justify-between items-start mb-2 pr-6">
                                 <div>
-                                  <span className="text-[9px] font-extrabold uppercase px-2 py-0.5 rounded bg-indigo-50 text-indigo-600 border border-indigo-100">
-                                    {c.game_type}
-                                  </span>
-                                  <h4 className="font-extrabold text-slate-900 group-hover:text-indigo-600 transition-colors text-sm sm:text-base mt-1.5">{c.title}</h4>
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="text-[8px] font-extrabold uppercase px-1.5 py-0.2 rounded bg-indigo-50 text-indigo-600 border border-indigo-100">
+                                      {s.play_mode === 'duo' ? 'Duo (2v2)' : 'Solo'}
+                                    </span>
+                                    {/* AUTOMATIC DATE DISPLAY BADGE */}
+                                    <span className="text-[9px] font-bold text-slate-400 flex items-center gap-0.5">
+                                      <Calendar size={10}/> {formatDate(s.created_at)}
+                                    </span>
+                                  </div>
+                                  <h4 className="font-extrabold text-slate-900 text-sm truncate mt-1">{s.session_name}</h4>
                                 </div>
                               </div>
 
                               <button 
-                                onClick={(e) => handleDeleteCompetition(c.id, e)}
-                                className="absolute top-3.5 right-3 text-slate-300 hover:text-rose-500 p-1 rounded-lg"
+                                onClick={(e) => handleDeleteCasualSession(s.id, e)}
+                                className="absolute top-3 right-2.5 text-slate-300 hover:text-rose-500 p-1"
                               >
-                                <Trash2 size={14}/>
+                                <Trash2 size={13}/>
                               </button>
 
-                              <div className="bg-slate-50 border border-slate-100 p-2.5 rounded-xl my-3 flex justify-between items-center text-xs">
-                                <div className="flex items-center gap-1.5">
-                                  <Award size={16} className="text-amber-500 shrink-0"/>
-                                  <span className="font-bold text-slate-800 truncate">{topPlayer ? topPlayer.player_name : 'No scores yet'}</span>
-                                </div>
-                                <span className="font-black text-indigo-600">{topPlayer ? `${topPlayer.total_score} pts` : '0 pts'}</span>
-                              </div>
-
-                              <div className="mt-auto grid grid-cols-2 gap-2 border-t border-slate-100 pt-2.5 text-[10px] font-bold text-slate-500">
-                                <div>Players: <b className="text-slate-800">{c.participants.length}</b></div>
-                                <div>Matches: <b className="text-slate-800">{c.matches.length}</b></div>
+                              <div className="mt-2 grid grid-cols-2 gap-2 border-t border-slate-100 pt-2 text-[10px] font-bold text-slate-500">
+                                <div>Players: <b className="text-slate-800">{s.players.length}</b></div>
+                                <div>Progress: <b className="text-slate-800">{roundsCount} / {s.target_rounds || 5} Rds</b></div>
                               </div>
                             </div>
                           );
@@ -837,478 +950,324 @@ export default function GamingPage() {
                 </div>
               )}
             </div>
+          )}
 
-          ) : currentCasual ? (
-
-            // ==========================================
-            // SPECIFIC CASUAL GAME SESSION (DIGU SCOREKEEPER)
-            // ==========================================
-            <div className="space-y-5 sm:space-y-6 animate-in slide-in-from-right-4 duration-300">
-              <div className="flex flex-col sm:flex-row justify-between sm:items-end gap-3 border-b border-slate-200/60 pb-4">
-                <div>
-                  <button onClick={() => setSelectedCasualId(null)} className="text-[10px] font-bold text-slate-400 hover:text-slate-800 uppercase tracking-wider flex items-center gap-1 mb-2 transition-colors">
-                    <ChevronLeft size={14}/> Back to Casual Sessions
-                  </button>
-                  <div className="flex items-center gap-2">
-                    <h2 className="text-xl sm:text-2xl font-black text-slate-900">{currentCasual.session_name}</h2>
-                    <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded bg-indigo-50 text-indigo-600 border border-indigo-100">
-                      {currentCasual.game_title}
-                    </span>
-                  </div>
+          {/* TOURNAMENTS VIEW */}
+          {hubTab === 'tournaments' && (
+            <div className="space-y-4">
+              <div className="bg-white rounded-2xl p-3.5 border border-slate-200 shadow-xs flex flex-col sm:flex-row gap-2.5 items-stretch sm:items-end">
+                <div className="grow">
+                  <label className="text-[9px] font-bold uppercase text-slate-400 mb-1 block">Tournament Title</label>
+                  <input 
+                    type="text" 
+                    placeholder="e.g. Resort FIFA Championship" 
+                    value={compTitle} 
+                    onChange={(e) => setCompTitle(e.target.value)} 
+                    className="w-full bg-slate-50 border border-slate-200 p-2 rounded-xl text-xs font-bold text-slate-800 focus:outline-none"
+                  />
                 </div>
 
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-extrabold text-slate-600 bg-slate-100 px-3 py-1.5 rounded-xl border border-slate-200">
-                    Round: {currentRoundsPlayed} / {currentCasual.target_rounds || 5}
-                  </span>
-                  <button onClick={() => handleDeleteCasualSession(currentCasual.id)} className="text-rose-500 hover:text-rose-700 text-[10px] font-bold uppercase tracking-wider flex items-center gap-1 bg-rose-50 px-3 py-1.5 rounded-lg border border-rose-100 transition-colors">
-                    <Trash2 size={13}/> Delete
-                  </button>
-                </div>
-              </div>
-
-              {/* GAME OVER NOTIFICATION BANNER */}
-              {isGameOver && (
-                <div className="bg-slate-900 text-white p-4 rounded-2xl shadow-lg flex flex-col sm:flex-row items-center justify-between gap-3 animate-in fade-in">
-                  <div className="flex items-center gap-3">
-                    <Trophy size={24} className="text-amber-400 shrink-0"/>
-                    <div>
-                      <h3 className="text-sm font-black uppercase tracking-wider text-amber-400">GAME OVER! Target Rounds Completed</h3>
-                      <p className="text-xs font-semibold text-slate-300">
-                        Winner: <b>{getRankedCasualPlayers()[0]?.player_name || 'N/A'}</b> ({getRankedCasualPlayers()[0]?.totalScore || 0} pts)
-                      </p>
-                    </div>
-                  </div>
-
-                  <button 
-                    onClick={handleAddExtraRound}
-                    className="w-full sm:w-auto px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs uppercase tracking-wider rounded-xl transition-transform active:scale-95 shrink-0"
+                <div className="w-full sm:w-40">
+                  <label className="text-[9px] font-bold uppercase text-slate-400 mb-1 block">Category</label>
+                  <select 
+                    value={gameType} 
+                    onChange={(e) => setGameType(e.target.value)} 
+                    className="w-full bg-slate-50 border border-slate-200 p-2 rounded-xl text-xs font-bold text-slate-700 focus:outline-none"
                   >
-                    + Add Extra Round
-                  </button>
-                </div>
-              )}
-
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
-                {/* LEFT 5 COLUMNS: LIVE RANKINGS & SEARCH PLAYER ADDITION */}
-                <div className="lg:col-span-5 space-y-5">
-                  
-                  {/* SEARCH & ADD PLAYER BOX */}
-                  <div className="bg-white rounded-2xl border border-slate-200/80 p-4 shadow-xs space-y-3">
-                    <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
-                      <Users size={15} className="text-slate-500"/> Add Session Player
-                    </h3>
-
-                    <div className="space-y-3">
-                      {/* Live Filter Search Input for Master List */}
-                      <div className="relative">
-                        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/>
-                        <input 
-                          type="text" 
-                          placeholder="Search Master Directory or type custom..." 
-                          value={playerSearchQuery}
-                          onChange={(e) => setPlayerSearchQuery(e.target.value)}
-                          className="w-full bg-slate-50 border border-slate-200 pl-9 pr-3 py-2.5 rounded-xl text-xs font-bold text-slate-800 focus:outline-none"
-                        />
-                      </div>
-
-                      {/* Filtered Search Results */}
-                      {playerSearchQuery.trim() !== "" && (
-                        <div className="bg-slate-50 border border-slate-200 rounded-xl p-2 max-h-40 overflow-y-auto space-y-1">
-                          {masterMembers
-                            .filter(m => m.full_name.toLowerCase().includes(playerSearchQuery.toLowerCase()))
-                            .map(m => (
-                              <button 
-                                key={m.id}
-                                onClick={() => handleAddCasualPlayerName(m.full_name, m.id)}
-                                className="w-full text-left px-2.5 py-1.5 rounded-lg bg-white hover:bg-indigo-50 text-xs font-bold text-slate-800 hover:text-indigo-600 transition-colors flex items-center justify-between"
-                              >
-                                <span>{m.full_name}</span>
-                                <span className="text-[9px] font-extrabold text-indigo-600 uppercase">+ Add</span>
-                              </button>
-                            ))}
-
-                          <button 
-                            onClick={() => handleAddCasualPlayerName(playerSearchQuery.trim())}
-                            className="w-full text-left px-2.5 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-bold flex items-center justify-between"
-                          >
-                            <span>Add Custom: "{playerSearchQuery}"</span>
-                            <Plus size={13}/>
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* RANKING SCOREBOARD (Rank 1, 2, 3...) */}
-                  <div className="bg-white rounded-2xl border border-slate-200/80 p-4 shadow-xs space-y-3">
-                    <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
-                      <Trophy size={16} className="text-amber-500"/> Standings Leaderboard
-                    </h3>
-
-                    {currentCasual.players.length === 0 ? (
-                      <p className="text-xs text-slate-400 italic text-center py-6">No players added to this session yet.</p>
-                    ) : (
-                      <div className="space-y-2">
-                        {getRankedCasualPlayers().map((p, idx) => (
-                          <div key={p.id} className="flex items-center justify-between bg-slate-50 border border-slate-100 p-3 rounded-xl text-xs">
-                            <div className="flex items-center gap-2.5 truncate">
-                              <span className={`w-6 h-6 rounded-full flex items-center justify-center font-black text-xs shrink-0 ${idx === 0 ? 'bg-amber-400 text-slate-900 shadow-xs' : idx === 1 ? 'bg-slate-300 text-slate-800' : idx === 2 ? 'bg-amber-700 text-white' : 'bg-slate-200 text-slate-600'}`}>
-                                {idx + 1}
-                              </span>
-                              <div className="truncate">
-                                <span className="font-bold text-slate-900 block truncate">{p.player_name}</span>
-                                {p.ginCount > 0 && (
-                                  <span className="text-[9px] font-extrabold text-amber-600 flex items-center gap-0.5">
-                                    <Star size={10} className="fill-amber-500 text-amber-500"/> {p.ginCount} Gin
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-
-                            <div className="flex items-center gap-3 shrink-0">
-                              <span className="font-black text-indigo-600 text-base">{p.totalScore} pts</span>
-                              <button onClick={() => handleRemoveCasualPlayer(p.id)} className="text-slate-300 hover:text-rose-500 p-0.5">
-                                <X size={14}/>
-                              </button>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
+                    <option value="FIFA / PS">🎮 FIFA / Console</option>
+                    <option value="Badminton">🏸 Badminton</option>
+                    <option value="General">🏆 General Sports</option>
+                  </select>
                 </div>
 
-                {/* RIGHT 7 COLUMNS: ROUND-BY-ROUND SCORE ENTRY WITH "GIN" STAR */}
-                <div className="lg:col-span-7 space-y-5">
-                  
-                  {/* LOG NEW ROUND FORM */}
-                  {!isGameOver && (
-                    <div className="bg-white rounded-2xl border border-slate-200/80 p-4 sm:p-5 shadow-xs space-y-4">
-                      <div className="flex justify-between items-center border-b border-slate-100 pb-2.5">
-                        <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
-                          <Gamepad2 size={16} className="text-indigo-600"/> Log Round {currentRoundsPlayed + 1} Score
-                        </h3>
-                        <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 bg-slate-100 text-slate-600 rounded">
-                          Round {currentRoundsPlayed + 1} of {currentCasual.target_rounds || 5}
-                        </span>
-                      </div>
-
-                      {currentCasual.players.length === 0 ? (
-                        <p className="text-xs text-slate-400 italic py-4">Search and add players on the left to start logging round scores.</p>
-                      ) : (
-                        <div className="space-y-3">
-                          <span className="text-[9px] font-bold uppercase text-slate-400 block">Click ⭐ Star on the player who "Gin" / Won this round:</span>
-                          
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                            {currentCasual.players.map(p => {
-                              const isGin = ginPlayerId === p.id;
-                              return (
-                                <div key={p.id} className="bg-slate-50 border border-slate-200 p-2.5 rounded-xl flex items-center justify-between gap-2">
-                                  <span className="text-xs font-bold text-slate-800 truncate flex-1">{p.player_name}</span>
-
-                                  {/* Star Button for Gin */}
-                                  <button 
-                                    type="button"
-                                    onClick={() => setGinPlayerId(isGin ? null : p.id)}
-                                    className={`p-1.5 rounded-lg border text-[10px] font-black flex items-center gap-1 transition-colors ${isGin ? 'bg-amber-400 text-slate-900 border-amber-400' : 'bg-white text-slate-400 border-slate-200'}`}
-                                    title="Mark as Round Gin Winner"
-                                  >
-                                    <Star size={12} className={isGin ? 'fill-slate-900' : ''}/> Gin
-                                  </button>
-
-                                  <input 
-                                    type="number" 
-                                    placeholder="Points" 
-                                    value={roundScoresInput[p.id] || ""}
-                                    onChange={(e) => {
-                                      const val = e.target.value;
-                                      setRoundScoresInput(prev => ({ ...prev, [p.id]: val }));
-                                    }}
-                                    className="w-20 bg-white border border-slate-200 p-1.5 rounded-lg text-xs font-bold text-slate-900 focus:outline-none"
-                                  />
-                                </div>
-                              );
-                            })}
-                          </div>
-
-                          <button 
-                            onClick={handleSaveCasualRoundScores}
-                            className="w-full h-10 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs uppercase tracking-wider rounded-xl shadow-xs transition-transform active:scale-95"
-                          >
-                            Save Round {currentRoundsPlayed + 1} Scores
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* ROUNDS LOG MATRIX TABLE WITH EDIT BUTTON */}
-                  <div className="bg-white rounded-2xl border border-slate-200/80 p-4 sm:p-5 shadow-xs space-y-3">
-                    <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider">Round-By-Round Breakdown Log</h3>
-
-                    {currentCasual.rounds.length === 0 ? (
-                      <p className="text-xs text-slate-400 italic text-center py-6">No rounds logged yet.</p>
-                    ) : (
-                      <div className="overflow-x-auto">
-                        <table className="w-full border-collapse text-left text-xs font-semibold">
-                          <thead>
-                            <tr className="bg-slate-50 text-slate-400 uppercase font-bold text-[9px] tracking-wider border-b border-slate-100">
-                              <th className="p-2.5">Round</th>
-                              {currentCasual.players.map(p => (
-                                <th key={p.id} className="p-2.5 text-center">{p.player_name}</th>
-                              ))}
-                              <th className="p-2.5 text-center">Action</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-slate-100">
-                            {Array.from(new Set(currentCasual.rounds.map(r => r.round_number))).map(rNum => (
-                              <tr key={rNum} className="hover:bg-slate-50/50">
-                                <td className="p-2.5 font-bold text-slate-900">Round {rNum}</td>
-                                {currentCasual.players.map(p => {
-                                  const rMatch = currentCasual.rounds.find(r => r.round_number === rNum && r.player_id === p.id);
-                                  return (
-                                    <td key={p.id} className="p-2.5 text-center font-bold text-slate-700">
-                                      {rMatch ? (
-                                        <span className="inline-flex items-center gap-1">
-                                          {rMatch.score}
-                                          {rMatch.is_gin && <Star size={10} className="fill-amber-500 text-amber-500 inline"/>}
-                                        </span>
-                                      ) : '-'}
-                                    </td>
-                                  );
-                                })}
-                                <td className="p-2.5 text-center flex items-center justify-center gap-1">
-                                  <button onClick={() => handleOpenEditRound(rNum)} className="text-slate-400 hover:text-slate-800 p-1">
-                                    <Pencil size={13}/>
-                                  </button>
-                                  <button onClick={() => handleDeleteCasualRound(rNum)} className="text-slate-300 hover:text-rose-500 p-1">
-                                    <X size={14}/>
-                                  </button>
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </div>
-
-          ) : currentComp ? (
-
-            // ==========================================
-            // SPECIFIC COMPETITION SCOREBOARD
-            // ==========================================
-            <div className="space-y-5 sm:space-y-6 animate-in slide-in-from-right-4 duration-300">
-              <div className="flex flex-col sm:flex-row justify-between sm:items-end gap-3 border-b border-slate-200/60 pb-4">
-                <div>
-                  <button onClick={() => setSelectedCompId(null)} className="text-[10px] font-bold text-slate-400 hover:text-slate-800 uppercase tracking-wider flex items-center gap-1 mb-2 transition-colors">
-                    <ChevronLeft size={14}/> Back to Tournaments Hub
-                  </button>
-                  <div className="flex items-center gap-2">
-                    <h2 className="text-xl sm:text-2xl font-black text-slate-900">{currentComp.title}</h2>
-                    <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded bg-indigo-50 text-indigo-600 border border-indigo-100">
-                      {currentComp.game_type}
-                    </span>
-                  </div>
-                </div>
-
-                <button onClick={() => handleDeleteCompetition(currentComp.id)} className="text-rose-500 hover:text-rose-700 text-[10px] font-bold uppercase tracking-wider flex items-center gap-1 bg-rose-50 px-3 py-1.5 rounded-lg border border-rose-100 transition-colors w-fit">
-                  <Trash2 size={13}/> Delete Tournament
+                <button 
+                  onClick={handleCreateCompetition}
+                  className="h-9 px-4 bg-slate-900 text-white font-bold text-xs uppercase tracking-wider rounded-xl shadow-xs shrink-0"
+                >
+                  + Create
                 </button>
               </div>
 
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
-                <div className="lg:col-span-5 space-y-5">
-                  <div className="bg-white rounded-2xl border border-slate-200/80 p-4 shadow-xs space-y-3">
-                    <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
-                      <Users size={15} className="text-slate-500"/> Add Player / Participant
-                    </h3>
-
-                    <div className="space-y-3">
-                      <div className="relative">
-                        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/>
-                        <input 
-                          type="text" 
-                          placeholder="Search Master Directory or type custom..." 
-                          value={playerSearchQuery}
-                          onChange={(e) => setPlayerSearchQuery(e.target.value)}
-                          className="w-full bg-slate-50 border border-slate-200 pl-9 pr-3 py-2.5 rounded-xl text-xs font-bold text-slate-800 focus:outline-none"
-                        />
-                      </div>
-
-                      {playerSearchQuery.trim() !== "" && (
-                        <div className="bg-slate-50 border border-slate-200 rounded-xl p-2 max-h-40 overflow-y-auto space-y-1">
-                          {masterMembers
-                            .filter(m => m.full_name.toLowerCase().includes(playerSearchQuery.toLowerCase()))
-                            .map(m => (
-                              <button 
-                                key={m.id}
-                                onClick={() => handleAddPlayerToCompetitionName(m.full_name, m.id)}
-                                className="w-full text-left px-2.5 py-1.5 rounded-lg bg-white hover:bg-indigo-50 text-xs font-bold text-slate-800 hover:text-indigo-600 transition-colors flex items-center justify-between"
-                              >
-                                <span>{m.full_name}</span>
-                                <span className="text-[9px] font-extrabold text-indigo-600 uppercase">+ Add</span>
-                              </button>
-                            ))}
-
-                          <button 
-                            onClick={() => handleAddPlayerToCompetitionName(playerSearchQuery.trim())}
-                            className="w-full text-left px-2.5 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-bold flex items-center justify-between"
-                          >
-                            <span>Add Custom: "{playerSearchQuery}"</span>
-                            <Plus size={13}/>
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="bg-white rounded-2xl border border-slate-200/80 p-4 shadow-xs space-y-3">
-                    <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
-                      <Trophy size={16} className="text-amber-500"/> Standings Leaderboard
-                    </h3>
-
-                    {currentComp.participants.length === 0 ? (
-                      <p className="text-xs text-slate-400 italic text-center py-6">No players added yet.</p>
-                    ) : (
-                      <div className="space-y-2">
-                        {currentComp.participants.map((p, idx) => (
-                          <div key={p.id} className="flex items-center justify-between bg-slate-50 border border-slate-100 p-2.5 rounded-xl text-xs">
-                            <div className="flex items-center gap-2 truncate">
-                              <span className={`w-5 h-5 rounded-full flex items-center justify-center font-black text-[10px] shrink-0 ${idx === 0 ? 'bg-amber-400 text-slate-900' : idx === 1 ? 'bg-slate-300 text-slate-800' : idx === 2 ? 'bg-amber-700 text-white' : 'bg-slate-200 text-slate-600'}`}>
-                                {idx + 1}
-                              </span>
-                              <span className="font-bold text-slate-900 truncate">{p.player_name}</span>
-                            </div>
-
-                            <div className="flex items-center gap-3 shrink-0">
-                              <span className="text-[10px] font-bold text-slate-400">{p.wins} Wins</span>
-                              <span className="font-black text-slate-900">{p.total_score} pts</span>
-                              <button onClick={() => handleRemoveTournamentPlayer(p.id)} className="text-slate-300 hover:text-rose-500 p-0.5">
-                                <X size={14}/>
-                              </button>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                <div className="lg:col-span-7 space-y-5">
-                  <div className="bg-white rounded-2xl border border-slate-200/80 p-4 sm:p-5 shadow-xs space-y-3">
-                    <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
-                      <Shield size={16} className="text-indigo-600"/> Log Match Result
-                    </h3>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-12 gap-2.5">
-                      <div className="sm:col-span-12">
-                        <input 
-                          type="text" 
-                          placeholder="Round Name (e.g. Semi-Finals, Match 1)" 
-                          value={roundLabel} 
-                          onChange={(e) => setRoundName(e.target.value)} 
-                          className="w-full bg-slate-50 border border-slate-200 p-2 rounded-xl text-xs font-bold text-slate-800 focus:outline-none"
-                        />
-                      </div>
-
-                      <div className="sm:col-span-6 bg-slate-50 p-3 rounded-xl border border-slate-100 space-y-2">
-                        <span className="text-[9px] font-bold uppercase text-slate-400 block">Player / Team 1</span>
-                        <select 
-                          value={p1Name} 
-                          onChange={(e) => setP1Name(e.target.value)} 
-                          className="w-full bg-white border border-slate-200 p-2 rounded-xl text-xs font-bold text-slate-800 focus:outline-none"
-                        >
-                          <option value="">Select Player...</option>
-                          {currentComp.participants.map(p => (
-                            <option key={p.id} value={p.player_name}>{p.player_name}</option>
-                          ))}
-                        </select>
-                        <input 
-                          type="number" 
-                          placeholder="Score" 
-                          value={p1Score} 
-                          onChange={(e) => setP1Score(e.target.value)} 
-                          className="w-full bg-white border border-slate-200 p-2 rounded-xl text-xs font-black text-slate-900 focus:outline-none"
-                        />
-                      </div>
-
-                      <div className="sm:col-span-6 bg-slate-50 p-3 rounded-xl border border-slate-100 space-y-2">
-                        <span className="text-[9px] font-bold uppercase text-slate-400 block">Player / Team 2</span>
-                        <select 
-                          value={p2Name} 
-                          onChange={(e) => setP2Name(e.target.value)} 
-                          className="w-full bg-white border border-slate-200 p-2 rounded-xl text-xs font-bold text-slate-800 focus:outline-none"
-                        >
-                          <option value="">Select Player...</option>
-                          {currentComp.participants.map(p => (
-                            <option key={p.id} value={p.player_name}>{p.player_name}</option>
-                          ))}
-                        </select>
-                        <input 
-                          type="number" 
-                          placeholder="Score" 
-                          value={p2Score} 
-                          onChange={(e) => setP2Score(e.target.value)} 
-                          className="w-full bg-white border border-slate-200 p-2 rounded-xl text-xs font-black text-slate-900 focus:outline-none"
-                        />
-                      </div>
-                    </div>
-
-                    <button 
-                      onClick={handleLogMatch}
-                      className="w-full h-10 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs uppercase tracking-wider rounded-xl shadow-xs transition-transform active:scale-95"
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {competitions.map((c: Competition) => {
+                  const topPlayer = c.participants[0];
+                  return (
+                    <div 
+                      key={c.id}
+                      onClick={() => setSelectedCompId(c.id)}
+                      className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-xs hover:border-slate-300 cursor-pointer flex flex-col relative"
                     >
-                      Save Match Score
-                    </button>
-                  </div>
-
-                  <div className="bg-white rounded-2xl border border-slate-200/80 p-4 sm:p-5 shadow-xs space-y-3">
-                    <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider">Recorded Matches Log</h3>
-
-                    {currentComp.matches.length === 0 ? (
-                      <p className="text-xs text-slate-400 italic text-center py-6">No matches recorded yet.</p>
-                    ) : (
-                      <div className="space-y-2.5">
-                        {currentComp.matches.map((m: Match) => (
-                          <div key={m.id} className="bg-slate-50 border border-slate-200/80 p-3 rounded-xl flex items-center justify-between text-xs">
-                            <div>
-                              <span className="text-[9px] font-extrabold uppercase text-slate-400 block mb-0.5">{m.round_name}</span>
-                              <p className="font-bold text-slate-900">
-                                <span className={m.winner_name === m.player1_name ? 'text-emerald-600 font-extrabold' : ''}>{m.player1_name} ({m.player1_score})</span> 
-                                <span className="text-slate-400 mx-1.5">vs</span> 
-                                <span className={m.winner_name === m.player2_name ? 'text-emerald-600 font-extrabold' : ''}>{m.player2_name} ({m.player2_score})</span>
-                              </p>
-                            </div>
-
-                            <button onClick={() => handleRemoveMatch(m.id)} className="text-slate-300 hover:text-rose-500 p-1">
-                              <X size={15}/>
-                            </button>
+                      <div className="flex justify-between items-start mb-2 pr-6">
+                        <div>
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[8px] font-extrabold uppercase px-1.5 py-0.2 rounded bg-indigo-50 text-indigo-600 border border-indigo-100">
+                              {c.game_type}
+                            </span>
+                            <span className="text-[9px] font-bold text-slate-400 flex items-center gap-0.5">
+                              <Calendar size={10}/> {formatDate(c.created_at)}
+                            </span>
                           </div>
-                        ))}
+                          <h4 className="font-extrabold text-slate-900 text-sm mt-1">{c.title}</h4>
+                        </div>
                       </div>
-                    )}
-                  </div>
-                </div>
+
+                      <button 
+                        onClick={(e) => handleDeleteCompetition(c.id, e)}
+                        className="absolute top-3 right-2.5 text-slate-300 hover:text-rose-500 p-1"
+                      >
+                        <Trash2 size={13}/>
+                      </button>
+
+                      <div className="bg-slate-50 border border-slate-100 p-2 rounded-xl my-2 flex justify-between items-center text-xs">
+                        <div className="flex items-center gap-1.5 truncate">
+                          <Award size={14} className="text-amber-500 shrink-0"/>
+                          <span className="font-bold text-slate-800 truncate">{topPlayer ? topPlayer.player_name : 'No scores'}</span>
+                        </div>
+                        <span className="font-black text-indigo-600 text-xs">{topPlayer ? `${topPlayer.total_score} pts` : '0 pts'}</span>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
-          ) : null}
-
+          )}
         </div>
 
-        {/* MOBILE FLOATING NAV DOCKBAR */}
-        <nav className="lg:hidden fixed bottom-4 left-1/2 -translate-x-1/2 w-[92%] max-w-90 h-14 bg-white/95 border border-slate-200/80 shadow-md rounded-2xl flex justify-around items-center px-2 z-100 backdrop-blur-md">
-          <Link href="/" className="text-slate-400 hover:text-slate-800"><Wallet size={18} /></Link>
-          <Link href="/tracker" className="text-slate-400 hover:text-slate-800"><Banknote size={18} /></Link>
-          <Link href="/splitter" className="text-slate-400 hover:text-slate-800"><Calculator size={18} /></Link>
-          <Link href="/activities" className="text-slate-400 hover:text-slate-800"><Flame size={18} /></Link>
-          <button onClick={() => { setSelectedCompId(null); setSelectedCasualId(null); setSelectedCasualCategory(null); }} className="text-slate-900"><Gamepad2 size={18} className="bg-slate-100 p-2 w-8 h-8 rounded-lg" /></button>
-        </nav>
-      </div>
-    </main>
+      ) : currentCasual ? (
+
+        // ==========================================
+        // SINGLE VIEWPORT CASUAL SCOREKEEPER
+        // ==========================================
+        <div className="space-y-3 animate-in fade-in duration-200">
+          
+          {/* Sticky Top Header */}
+          <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+            <div className="flex items-center gap-2 truncate">
+              <button onClick={() => setSelectedCasualId(null)} className="p-1 rounded-lg bg-slate-100 text-slate-600">
+                <ChevronLeft size={16}/>
+              </button>
+              <div>
+                <div className="flex items-center gap-1.5">
+                  <h2 className="text-sm sm:text-base font-black text-slate-900 truncate">{currentCasual.session_name}</h2>
+                  <span className="text-[9px] font-bold text-slate-400 flex items-center gap-0.5 shrink-0">
+                    <Calendar size={10}/> {formatDate(currentCasual.created_at)}
+                  </span>
+                </div>
+                <span className="text-[9px] font-extrabold uppercase text-indigo-600 block">
+                  {currentCasual.game_title} • {currentCasual.play_mode === 'duo' ? 'Duo Mode (2v2)' : 'Solo Mode'}
+                </span>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-1.5 shrink-0">
+              <span className="text-[10px] font-extrabold uppercase bg-slate-100 text-slate-700 px-2 py-1 rounded-lg border border-slate-200">
+                Rd {currentRoundsPlayed}/{currentCasual.target_rounds || 5}
+              </span>
+              <button 
+                onClick={() => setIsAddPlayerModalOpen(true)}
+                className="p-1.5 bg-slate-900 text-white rounded-lg text-xs font-bold flex items-center gap-1"
+              >
+                <UserPlus size={13}/>
+              </button>
+              <button onClick={() => handleDeleteCasualSession(currentCasual.id)} className="p-1.5 text-rose-500 hover:bg-rose-50 rounded-lg">
+                <Trash2 size={14}/>
+              </button>
+            </div>
+          </div>
+
+          {/* GAME OVER NOTIFICATION */}
+          {isGameOver && (
+            <div className="bg-slate-900 text-white p-2.5 rounded-xl flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 truncate">
+                <Trophy size={18} className="text-amber-400 shrink-0"/>
+                <span className="text-xs font-bold truncate">
+                  Winner: <b>{getRankedCasualPlayers()[0]?.player_name || 'N/A'}</b> ({getRankedCasualPlayers()[0]?.totalScore || 0} pts)
+                </span>
+              </div>
+              <button onClick={handleAddExtraRound} className="px-2.5 py-1 bg-indigo-600 text-white text-[10px] font-bold uppercase rounded-lg shrink-0">
+                + Extra Round
+              </button>
+            </div>
+          )}
+
+          {/* HORIZONTAL LIVE SCOREBOARD BADGES */}
+          <div className="flex gap-2 overflow-x-auto pb-1 no-scrollbar">
+            {getRankedCasualPlayers().map((p, idx) => (
+              <div key={p.id} className="bg-white border border-slate-200/80 px-2.5 py-1.5 rounded-xl shadow-2xs shrink-0 flex items-center gap-2">
+                <span className={`w-4 h-4 rounded-full flex items-center justify-center font-black text-[9px] ${idx === 0 ? 'bg-amber-400 text-slate-900' : idx === 1 ? 'bg-slate-300 text-slate-800' : 'bg-slate-100 text-slate-600'}`}>
+                  {idx + 1}
+                </span>
+                <div>
+                  <div className="flex items-center gap-1">
+                    <span className="text-xs font-bold text-slate-900 max-w-20 truncate">{p.player_name}</span>
+                    {currentCasual.play_mode === 'duo' && (
+                      <span className={`text-[8px] font-black px-1 rounded ${p.team_number === 2 ? 'bg-amber-100 text-amber-800' : 'bg-indigo-100 text-indigo-800'}`}>
+                        T{p.team_number || 1}
+                      </span>
+                    )}
+                    {p.ginCount > 0 && (
+                      <span className="text-[9px] font-extrabold text-amber-600 flex items-center">
+                        <Star size={9} className="fill-amber-500 text-amber-500"/>{p.ginCount}
+                      </span>
+                    )}
+                  </div>
+                  <span className="text-[10px] font-black text-indigo-600 block leading-none">{p.totalScore} pts</span>
+                </div>
+                <button onClick={() => handleRemoveCasualPlayer(p.id)} className="text-slate-300 hover:text-rose-500 p-0.5 ml-1">
+                  <X size={12}/>
+                </button>
+              </div>
+            ))}
+          </div>
+
+          {/* SINGLE INTEGRATED MATRIX TABLE */}
+          <div className="bg-white rounded-2xl border border-slate-200/80 p-2 sm:p-3 shadow-xs space-y-2">
+            <div className="overflow-x-auto max-h-[60vh]">
+              <table className="w-full border-collapse text-left text-xs font-semibold">
+                <thead>
+                  <tr className="bg-slate-50 text-slate-400 uppercase font-bold text-[9px] border-b border-slate-100">
+                    <th className="p-2 min-w-16">Round</th>
+                    {currentCasual.players.map(p => (
+                      <th key={p.id} className="p-2 text-center min-w-20">
+                        {p.player_name}
+                        {currentCasual.play_mode === 'duo' && (
+                          <span className={`block text-[8px] font-extrabold ${p.team_number === 2 ? 'text-amber-600' : 'text-indigo-600'}`}>
+                            Team {p.team_number || 1}
+                          </span>
+                        )}
+                      </th>
+                    ))}
+                    <th className="p-2 text-center min-w-10">Act</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {Array.from(new Set(currentCasual.rounds.map(r => r.round_number))).map(rNum => (
+                    <tr key={rNum} className="hover:bg-slate-50/50">
+                      <td className="p-2 font-bold text-slate-900 text-xs">Rd {rNum}</td>
+                      {currentCasual.players.map(p => {
+                        const rMatch = currentCasual.rounds.find(r => r.round_number === rNum && r.player_id === p.id);
+                        return (
+                          <td key={p.id} className="p-2 text-center font-bold text-slate-700 text-xs">
+                            {rMatch ? (
+                              <span className="inline-flex items-center gap-0.5">
+                                {rMatch.score}
+                                {rMatch.is_gin && <Star size={9} className="fill-amber-500 text-amber-500 inline"/>}
+                              </span>
+                            ) : '-'}
+                          </td>
+                        );
+                      })}
+                      <td className="p-2 text-center">
+                        <button onClick={() => handleOpenEditRound(rNum)} className="text-slate-400 p-0.5"><Pencil size={11}/></button>
+                      </td>
+                    </tr>
+                  ))}
+
+                  {!isGameOver && currentCasual.players.length > 0 && (
+                    <tr className="bg-indigo-50/30 font-bold border-t-2 border-indigo-100">
+                      <td className="p-2 text-indigo-700 font-black text-xs">
+                        Rd {currentRoundsPlayed + 1}
+                      </td>
+                      {currentCasual.players.map(p => {
+                        const isGin = ginPlayerId === p.id;
+                        return (
+                          <td key={p.id} className="p-1.5 text-center">
+                            <div className="flex flex-col items-center gap-1">
+                              <button 
+                                type="button"
+                                onClick={() => setGinPlayerId(isGin ? null : p.id)}
+                                className={`p-1 rounded text-[8px] font-black flex items-center gap-0.5 border ${isGin ? 'bg-amber-400 text-slate-900 border-amber-400' : 'bg-white text-slate-400 border-slate-200'}`}
+                              >
+                                <Star size={9} className={isGin ? 'fill-slate-900' : ''}/> Gin
+                              </button>
+
+                              <input 
+                                type="number" 
+                                placeholder="0"
+                                value={roundScoresInput[p.id] || ""}
+                                onChange={(e) => handleScoreInputChange(p.id, e.target.value)}
+                                className="w-14 bg-white border border-slate-200 p-1 rounded-md text-xs font-black text-center text-slate-900 focus:outline-none shadow-2xs"
+                              />
+                            </div>
+                          </td>
+                        );
+                      })}
+                      <td className="p-1.5 text-center">
+                        <button 
+                          onClick={handleSaveCasualRoundScores}
+                          className="p-2 bg-slate-900 text-white rounded-lg text-xs font-bold"
+                          title="Save Round"
+                        >
+                          <CheckCircle2 size={14}/>
+                        </button>
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+      ) : currentComp ? (
+
+        // ==========================================
+        // TOURNAMENT MATCH LOGGING VIEW
+        // ==========================================
+        <div className="space-y-4 animate-in fade-in duration-200">
+          <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+            <button onClick={() => setSelectedCompId(null)} className="p-1 rounded-lg bg-slate-100 text-slate-600">
+              <ChevronLeft size={16}/>
+            </button>
+            <div>
+              <h2 className="text-sm font-black text-slate-900 truncate">{currentComp.title}</h2>
+              <span className="text-[9px] font-bold text-slate-400 flex items-center gap-0.5">
+                <Calendar size={10}/> {formatDate(currentComp.created_at)}
+              </span>
+            </div>
+            <button onClick={() => setIsAddPlayerModalOpen(true)} className="p-1.5 bg-slate-900 text-white rounded-lg text-xs font-bold">
+              + Player
+            </button>
+          </div>
+
+          <div className="bg-white rounded-2xl p-3 border border-slate-200 space-y-2">
+            <span className="text-[9px] font-bold uppercase text-slate-400">Leaderboard</span>
+            <div className="space-y-1.5">
+              {currentComp.participants.map((p, idx) => (
+                <div key={p.id} className="flex justify-between items-center bg-slate-50 p-2 rounded-xl text-xs font-bold">
+                  <div className="flex items-center gap-2">
+                    <span>#{idx + 1}</span>
+                    <span>{p.player_name}</span>
+                  </div>
+                  <span className="text-indigo-600">{p.total_score} pts ({p.wins}W)</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="bg-white rounded-2xl p-3 border border-slate-200 space-y-2">
+            <span className="text-[9px] font-bold uppercase text-slate-400">Log Match Result</span>
+            <div className="grid grid-cols-2 gap-2">
+              <select value={p1Name} onChange={(e) => setP1Name(e.target.value)} className="bg-slate-50 p-2 rounded-xl text-xs font-bold border border-slate-200">
+                <option value="">Player 1...</option>
+                {currentComp.participants.map(p => <option key={p.id} value={p.player_name}>{p.player_name}</option>)}
+              </select>
+              <input type="number" placeholder="P1 Score" value={p1Score} onChange={(e) => setP1Score(e.target.value)} className="bg-slate-50 p-2 rounded-xl text-xs font-bold border border-slate-200"/>
+
+              <select value={p2Name} onChange={(e) => setP2Name(e.target.value)} className="bg-slate-50 p-2 rounded-xl text-xs font-bold border border-slate-200">
+                <option value="">Player 2...</option>
+                {currentComp.participants.map(p => <option key={p.id} value={p.player_name}>{p.player_name}</option>)}
+              </select>
+              <input type="number" placeholder="P2 Score" value={p2Score} onChange={(e) => setP2Score(e.target.value)} className="bg-slate-50 p-2 rounded-xl text-xs font-bold border border-slate-200"/>
+            </div>
+
+            <button onClick={handleLogMatch} className="w-full py-2 bg-slate-900 text-white text-xs font-bold uppercase rounded-xl">
+              Save Match
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+    </div>
   );
 }

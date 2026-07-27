@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import Navigation from "@/components/Navigation";
 
 // @ts-ignore
 import "./globals.css";
@@ -34,8 +35,11 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className={`${geistSans.variable} ${geistMono.variable} antialiased bg-[#F8FAFC]`}>
-        {children}
+      <body className={`${geistSans.variable} ${geistMono.variable} antialiased bg-[#F8FAFC] flex min-h-screen`}>
+        <Navigation />
+        <div className="flex-grow min-w-0 min-h-screen">
+          {children}
+        </div>
       </body>
     </html>
   );
