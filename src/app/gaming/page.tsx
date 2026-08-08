@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import { 
   Gamepad2, Plus, Trash2, Trophy, Users, Shield, Award, 
-  ChevronLeft, CheckCircle2, AlertCircle, X, Spade, Sparkles, Search, Star, Pencil, UserPlus, Flame as FireIcon, Users2, User, Hash, Calendar, Clock
+  ChevronLeft, CheckCircle2, AlertCircle, X, Spade, Sparkles, Search, Star, Pencil, UserPlus, Flame as FlameIcon, Users2, User, Hash, Calendar, Clock, Crown, Minus, HeartHandshake, Calculator
 } from "lucide-react";
 
 interface MasterMember {
@@ -43,7 +43,7 @@ interface Competition {
   matches: Match[];
 }
 
-// Casual Game Types (Digu, 10, Bondi)
+// Casual Game Types (Digu, 10, Bondi, UNO)
 interface CasualPlayer {
   id: string;
   session_id: string;
@@ -67,6 +67,8 @@ interface CasualSession {
   game_title: string;
   play_mode?: 'solo' | 'duo';
   target_rounds: number;
+  win_condition?: 'rounds' | 'points';
+  target_points?: number;
   created_at?: string;
   players: CasualPlayer[];
   rounds: CasualRoundScore[];
@@ -96,6 +98,8 @@ export default function GamingPage() {
   const [casualName, setCasualName] = useState("");
   const [playMode, setPlayMode] = useState<'solo' | 'duo'>('solo');
   const [targetRoundsInput, setTargetRoundsInput] = useState("5");
+  const [winCondition, setWinCondition] = useState<'rounds' | 'points'>('rounds');
+  const [targetPointsInput, setTargetPointsInput] = useState("500");
 
   // Add Player Pop-over State
   const [isAddPlayerModalOpen, setIsAddPlayerModalOpen] = useState(false);
@@ -112,6 +116,11 @@ export default function GamingPage() {
   // Log Casual Round Scores State
   const [roundScoresInput, setRoundScoresInput] = useState<Record<string, string>>({});
   const [ginPlayerId, setGinPlayerId] = useState<string | null>(null);
+
+  // UNO Interactive Expression States (e.g., "9+5+4+6")
+  const [unoExpressions, setUnoExpressions] = useState<Record<string, string>>({});
+  const [unoActionCounts, setUnoActionCounts] = useState<Record<string, number>>({});
+  const [unoWildCounts, setUnoWildCounts] = useState<Record<string, number>>({});
 
   // Edit Round Modal State
   const [editRoundModal, setEditMemberModal] = useState<{
@@ -135,6 +144,18 @@ export default function GamingPage() {
     if (!dateStr) return new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
     const d = new Date(dateStr);
     return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+  };
+
+  // Safe Math Expression Evaluator for card strings like "9+5+4+6"
+  const evaluateCardExpression = (expr: string): number => {
+    try {
+      const sanitized = expr.replace(/[^0-9+]/g, '');
+      if (!sanitized) return 0;
+      const parts = sanitized.split('+').filter(p => p !== '');
+      return parts.reduce((sum, num) => sum + (parseInt(num, 10) || 0), 0);
+    } catch {
+      return 0;
+    }
   };
 
   const fetchMasterMembers = async () => {
@@ -165,23 +186,34 @@ export default function GamingPage() {
 
   const fetchCasualSessions = useCallback(async () => {
     setLoading(true);
-    const { data: sesData, error } = await supabase.from('casual_game_sessions').select('*').order('created_at', { ascending: false });
+    const { data: sesData, error } = await supabase.from('casual_game_sessions').select('*').order('created_at', { ascending: true });
 
     if (!error && sesData) {
+      const counters: Record<string, number> = {};
+
       const consolidated: CasualSession[] = await Promise.all(sesData.map(async (s: any) => {
+        const gTitle = s.game_title || 'Digu';
+        counters[gTitle] = (counters[gTitle] || 0) + 1;
+        const autoName = `Game ${counters[gTitle]}`;
+
         const [pRes, rRes] = await Promise.all([
           supabase.from('casual_game_players').select('*').eq('session_id', s.id).order('created_at', { ascending: true }),
           supabase.from('casual_game_rounds').select('*').eq('session_id', s.id).order('round_number', { ascending: true })
         ]);
+
         return {
           ...s,
+          session_name: autoName,
           play_mode: s.play_mode || 'solo',
           target_rounds: s.target_rounds || 5,
+          win_condition: s.win_condition || 'rounds',
+          target_points: s.target_points || 500,
           players: pRes.data || [],
           rounds: rRes.data || []
         };
       }));
-      setCasualSessions(consolidated);
+
+      setCasualSessions(consolidated.reverse());
     }
     setLoading(false);
   }, []);
@@ -192,8 +224,28 @@ export default function GamingPage() {
     fetchCasualSessions();
   }, [fetchCompetitions, fetchCasualSessions]);
 
+  useEffect(() => {
+    if (selectedCasualCategory) {
+      const count = casualSessions.filter(s => s.game_title === selectedCasualCategory).length;
+      setCasualName(`Game ${count + 1}`);
+      if (selectedCasualCategory === 'UNO') {
+        setWinCondition('points');
+      } else {
+        setWinCondition('rounds');
+      }
+    }
+  }, [selectedCasualCategory, casualSessions]);
+
   const currentComp = competitions.find(c => c.id === selectedCompId);
   const currentCasual = casualSessions.find(s => s.id === selectedCasualId);
+
+  // Calculate total calculated points for a player in UNO
+  const getUnoPlayerCalculatedTotal = (playerId: string) => {
+    const numberSum = evaluateCardExpression(unoExpressions[playerId] || '');
+    const actionSum = (unoActionCounts[playerId] || 0) * 20;
+    const wildSum = (unoWildCounts[playerId] || 0) * 50;
+    return numberSum + actionSum + wildSum;
+  };
 
   // --- Handlers ---
   const handleCreateCompetition = async () => {
@@ -247,11 +299,6 @@ export default function GamingPage() {
     }
   };
 
-  const handleRemoveTournamentPlayer = async (pId: string) => {
-    await supabase.from('gaming_participants').delete().eq('id', pId);
-    fetchCompetitions();
-  };
-
   const handleLogMatch = async () => {
     if (!currentComp) return;
     if (!p1Name || !p2Name) return showToast("Select both players", "error");
@@ -299,27 +346,25 @@ export default function GamingPage() {
     }
   };
 
-  const handleRemoveMatch = async (mId: string) => {
-    await supabase.from('gaming_matches').delete().eq('id', mId);
-    fetchCompetitions();
-  };
-
-  // --- Handlers for Casual Sessions (Digu, 10, Bondi) ---
   const handleCreateCasualSession = async () => {
-    if (!casualName.trim()) return showToast("Enter session name", "error");
     const category = selectedCasualCategory || "Digu";
+    const categoryCount = casualSessions.filter(s => s.game_title === category).length;
+    const autoTitle = casualName.trim() || `Game ${categoryCount + 1}`;
     const roundsTarget = parseInt(targetRoundsInput) || 5;
+    const ptsTarget = parseInt(targetPointsInput) || 500;
 
-    const { data, error } = await supabase.from('casual_game_sessions').insert({
-      session_name: casualName.trim(),
+    // Insert payload with fallback handling for database schema
+    const payload: any = {
+      session_name: autoTitle,
       game_title: category,
       play_mode: playMode,
       target_rounds: roundsTarget
-    }).select().single();
+    };
+
+    const { data, error } = await supabase.from('casual_game_sessions').insert([payload]).select().single();
 
     if (!error && data) {
-      setCasualName("");
-      showToast(`${category} session started!`);
+      showToast(`${category} (${autoTitle}) started!`);
       fetchCasualSessions();
       setSelectedCasualId(data.id);
     } else {
@@ -388,6 +433,21 @@ export default function GamingPage() {
     }
   };
 
+  const handleAdjustScoreInput = (playerId: string, delta: number) => {
+    const currentVal = parseFloat(roundScoresInput[playerId] || "0") || 0;
+    const newVal = Math.max(0, currentVal + delta).toString();
+    handleScoreInputChange(playerId, newVal);
+  };
+
+  // Append a card value to the expression (e.g., adding "9" to "9+5" becomes "9+5+9")
+  const handleUnoAddDigitToExpr = (playerId: string, digit: number) => {
+    setUnoExpressions(prev => {
+      const curr = prev[playerId] || "";
+      const updated = curr ? `${curr}+${digit}` : `${digit}`;
+      return { ...prev, [playerId]: updated };
+    });
+  };
+
   const handleSaveCasualRoundScores = async () => {
     if (!currentCasual || currentCasual.players.length === 0) return showToast("Add players first", "error");
 
@@ -396,18 +456,42 @@ export default function GamingPage() {
       : 0;
     const nextRoundNum = maxRound + 1;
 
-    const roundPayload = currentCasual.players.map(p => ({
-      session_id: currentCasual.id,
-      round_number: nextRoundNum,
-      player_id: p.id,
-      score: parseFloat(roundScoresInput[p.id] || "0") || 0,
-      is_gin: ginPlayerId === p.id
-    }));
+    let roundPayload: any[] = [];
+
+    if (currentCasual.game_title === 'UNO') {
+      if (!ginPlayerId) return showToast("Select 'The UNO' round winner!", "error");
+
+      let totalUnoRoundPoints = 0;
+      currentCasual.players.forEach(p => {
+        if (p.id !== ginPlayerId) {
+          totalUnoRoundPoints += getUnoPlayerCalculatedTotal(p.id);
+        }
+      });
+
+      roundPayload = currentCasual.players.map(p => ({
+        session_id: currentCasual.id,
+        round_number: nextRoundNum,
+        player_id: p.id,
+        score: p.id === ginPlayerId ? totalUnoRoundPoints : 0,
+        is_gin: p.id === ginPlayerId
+      }));
+    } else {
+      roundPayload = currentCasual.players.map(p => ({
+        session_id: currentCasual.id,
+        round_number: nextRoundNum,
+        player_id: p.id,
+        score: parseFloat(roundScoresInput[p.id] || "0") || 0,
+        is_gin: ginPlayerId === p.id
+      }));
+    }
 
     const { error } = await supabase.from('casual_game_rounds').insert(roundPayload);
 
     if (!error) {
       setRoundScoresInput({});
+      setUnoExpressions({});
+      setUnoActionCounts({});
+      setUnoWildCounts({});
       setGinPlayerId(null);
       showToast(`Round ${nextRoundNum} saved!`);
       fetchCasualSessions();
@@ -455,19 +539,6 @@ export default function GamingPage() {
     fetchCasualSessions();
   };
 
-  const handleDeleteCasualRound = async (roundNum: number) => {
-    if (!currentCasual) return;
-    if (!confirm(`Delete Round ${roundNum}?`)) return;
-
-    await supabase.from('casual_game_rounds')
-      .delete()
-      .eq('session_id', currentCasual.id)
-      .eq('round_number', roundNum);
-
-    showToast(`Round ${roundNum} deleted`);
-    fetchCasualSessions();
-  };
-
   const handleAddExtraRound = async () => {
     if (!currentCasual) return;
     const newTarget = (currentCasual.target_rounds || 5) + 1;
@@ -476,28 +547,25 @@ export default function GamingPage() {
     fetchCasualSessions();
   };
 
-  const getCasualPlayerTotalScore = (playerId: string) => {
-    if (!currentCasual) return 0;
-    return currentCasual.rounds
+  const getCasualPlayerTotalScore = (session: CasualSession, playerId: string) => {
+    return session.rounds
       .filter(r => r.player_id === playerId)
       .reduce((sum, r) => sum + (parseFloat(r.score as any) || 0), 0);
   };
 
-  const getCasualPlayerGinCount = (playerId: string) => {
-    if (!currentCasual) return 0;
-    return currentCasual.rounds.filter(r => r.player_id === playerId && r.is_gin).length;
+  const getCasualPlayerGinCount = (session: CasualSession, playerId: string) => {
+    return session.rounds.filter(r => r.player_id === playerId && r.is_gin).length;
   };
 
-  const getRankedCasualPlayers = () => {
-    if (!currentCasual) return [];
-    return [...currentCasual.players].map(p => ({
+  const getRankedCasualPlayers = (session: CasualSession) => {
+    return [...session.players].map(p => ({
       ...p,
-      totalScore: getCasualPlayerTotalScore(p.id),
-      ginCount: getCasualPlayerGinCount(p.id)
+      totalScore: getCasualPlayerTotalScore(session, p.id),
+      ginCount: getCasualPlayerGinCount(session, p.id)
     })).sort((a, b) => b.totalScore - a.totalScore);
   };
 
-  // --- CAREER STATS CALCULATION ---
+  // --- CAREER STATS CALCULATION FOR ALL GAMES ---
   const calculateTopCareerStats = () => {
     const playerStatsMap: Record<string, { name: string; matches: number; totalScore: number; maxSingleGame: number; ginCount: number }> = {};
 
@@ -531,7 +599,7 @@ export default function GamingPage() {
       mostPlayed: mostPlayed ? { name: mostPlayed.name, val: `${mostPlayed.matches} games` } : { name: "N/A", val: "0" },
       highestTotalScore: highestTotalScore ? { name: highestTotalScore.name, val: `${highestTotalScore.totalScore} pts` } : { name: "N/A", val: "0" },
       highestSingleMatch: highestSingleMatch ? { name: highestSingleMatch.name, val: `${highestSingleMatch.maxSingleGame} pts` } : { name: "N/A", val: "0" },
-      mostGins: mostGins ? { name: mostGins.name, val: `${mostGins.ginCount} Gins` } : { name: "N/A", val: "0" }
+      mostGins: mostGins ? { name: mostGins.name, val: `${mostGins.ginCount} Gins/UNOs` } : { name: "N/A", val: "0" }
     };
   };
 
@@ -543,28 +611,40 @@ export default function GamingPage() {
       icon: Spade, 
       badge: "Card Classic",
       desc: "Solo & Duo 2v2 Team Scoring",
-      gradient: "from-slate-900 via-indigo-950 to-slate-900 border-indigo-500/30 text-white" 
+      gradient: "bg-linear-to-r from-slate-900 via-indigo-950 to-slate-900 border-indigo-500/30 text-white" 
     },
     { 
       title: "10", 
       icon: Hash, 
       badge: "Points Match",
       desc: "10-Points Card Game",
-      gradient: "from-slate-900 via-amber-950 to-slate-900 border-amber-500/30 text-white" 
+      gradient: "bg-linear-to-r from-slate-900 via-amber-950 to-slate-900 border-amber-500/30 text-white" 
     },
     { 
       title: "Bondi", 
       icon: Sparkles, 
       badge: "Round Game",
       desc: "Classic Round Points Tracker",
-      gradient: "from-slate-900 via-emerald-950 to-slate-900 border-emerald-500/30 text-white" 
+      gradient: "bg-linear-to-r from-slate-900 via-emerald-950 to-slate-900 border-emerald-500/30 text-white" 
+    },
+    { 
+      title: "UNO", 
+      icon: HeartHandshake, 
+      badge: "Color Cards",
+      desc: "Winner Gains Remaining Card Points",
+      gradient: "bg-linear-to-r from-slate-900 via-rose-950 to-slate-900 border-rose-500/30 text-white" 
     }
   ];
 
   const currentRoundsPlayed = currentCasual?.rounds.length 
     ? Math.max(...currentCasual.rounds.map(r => r.round_number))
     : 0;
-  const isGameOver = currentCasual ? currentRoundsPlayed >= (currentCasual.target_rounds || 5) : false;
+
+  const isGameOver = currentCasual 
+    ? currentCasual.win_condition === 'points'
+      ? getRankedCasualPlayers(currentCasual).some(p => p.totalScore >= (currentCasual.target_points || 500))
+      : currentRoundsPlayed >= (currentCasual.target_rounds || 5)
+    : false;
 
   return (
     <div className="w-full max-w-7xl mx-auto px-2 sm:px-6 lg:px-8 py-3 sm:py-8 pb-28">
@@ -644,71 +724,10 @@ export default function GamingPage() {
                   }}
                   className="w-full text-left px-2.5 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-bold flex items-center justify-between"
                 >
-                  <span>Add Custom: "{playerSearchQuery}"</span>
+                  <span>Add Custom: &quot;{playerSearchQuery}&quot;</span>
                   <Plus size={13}/>
                 </button>
               )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* EDIT CASUAL ROUND MODAL */}
-      {editRoundModal.isOpen && editRoundModal.roundNumber !== null && currentCasual && (
-        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs z-1000 flex items-center justify-center p-3 sm:p-4">
-          <div className="bg-white rounded-2xl border border-slate-200 p-4 max-w-sm w-full shadow-2xl space-y-3">
-            <div className="flex justify-between items-center border-b border-slate-100 pb-2">
-              <h3 className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
-                <Pencil size={15} className="text-indigo-600"/> Edit Round {editRoundModal.roundNumber} Scores
-              </h3>
-              <button onClick={() => setEditMemberModal({ isOpen: false, roundNumber: null, scores: {}, ginId: null })} className="text-slate-400"><X size={16}/></button>
-            </div>
-
-            <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
-              {currentCasual.players.map(p => {
-                const isGin = editRoundModal.ginId === p.id;
-                return (
-                  <div key={p.id} className="bg-slate-50 border border-slate-200 p-2 rounded-xl flex items-center justify-between gap-2">
-                    <span className="text-xs font-bold text-slate-800 truncate flex-1">{p.player_name}</span>
-
-                    <button 
-                      type="button"
-                      onClick={() => setEditMemberModal(prev => ({ ...prev, ginId: isGin ? null : p.id }))}
-                      className={`p-1 rounded text-[9px] font-black flex items-center gap-0.5 border ${isGin ? 'bg-amber-400 text-slate-900 border-amber-400' : 'bg-white text-slate-400 border-slate-200'}`}
-                    >
-                      <Star size={11} className={isGin ? 'fill-slate-900' : ''}/> Gin
-                    </button>
-
-                    <input 
-                      type="number" 
-                      value={editRoundModal.scores[p.id] || ""}
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        setEditMemberModal(prev => ({
-                          ...prev,
-                          scores: { ...prev.scores, [p.id]: val }
-                        }));
-                      }}
-                      className="w-16 bg-white border border-slate-200 p-1 rounded-lg text-xs font-bold text-slate-900 focus:outline-none"
-                    />
-                  </div>
-                );
-              })}
-            </div>
-
-            <div className="flex gap-2 pt-2 border-t border-slate-100">
-              <button 
-                onClick={() => setEditMemberModal({ isOpen: false, roundNumber: null, scores: {}, ginId: null })} 
-                className="flex-1 py-2 bg-slate-100 text-slate-600 font-bold text-xs rounded-xl"
-              >
-                Cancel
-              </button>
-              <button 
-                onClick={handleSaveEditedRound} 
-                className="flex-1 py-2 bg-slate-900 text-white font-bold text-xs rounded-xl"
-              >
-                Save
-              </button>
             </div>
           </div>
         </div>
@@ -742,7 +761,7 @@ export default function GamingPage() {
             </div>
           </header>
 
-          {/* ALL-TIME CAREER STATISTICS INSIGHTS */}
+          {/* DIGU & UNO COMBINED CAREER STATISTICS INSIGHTS */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5">
             <div className="bg-white border border-slate-200/80 p-3 rounded-2xl shadow-xs">
               <span className="text-[9px] font-extrabold uppercase text-slate-400 tracking-wider flex items-center gap-1">
@@ -762,7 +781,7 @@ export default function GamingPage() {
 
             <div className="bg-white border border-slate-200/80 p-3 rounded-2xl shadow-xs">
               <span className="text-[9px] font-extrabold uppercase text-slate-400 tracking-wider flex items-center gap-1">
-                <FireIcon size={11} className="text-rose-500"/> Single Game Record
+                <FlameIcon size={11} className="text-rose-500"/> Single Game Record
               </span>
               <p className="text-xs font-black text-slate-900 truncate mt-1">{careerStats.highestSingleMatch.name}</p>
               <span className="text-[10px] font-bold text-rose-600">{careerStats.highestSingleMatch.val}</span>
@@ -770,7 +789,7 @@ export default function GamingPage() {
 
             <div className="bg-white border border-slate-200/80 p-3 rounded-2xl shadow-xs">
               <span className="text-[9px] font-extrabold uppercase text-slate-400 tracking-wider flex items-center gap-1">
-                <Star size={11} className="fill-amber-400 text-amber-500"/> Most Gins
+                <Star size={11} className="fill-amber-400 text-amber-500"/> Most Gins / UNOs
               </span>
               <p className="text-xs font-black text-slate-900 truncate mt-1">{careerStats.mostGins.name}</p>
               <span className="text-[10px] font-bold text-amber-600">{careerStats.mostGins.val}</span>
@@ -787,7 +806,7 @@ export default function GamingPage() {
                     <Spade size={15} className="text-indigo-600"/> Choose Game Type
                   </h3>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
                     {casualGameCategories.map((cat, idx) => {
                       const IconComponent = cat.icon;
                       const categorySessions = casualSessions.filter(s => s.game_title === cat.title);
@@ -796,7 +815,7 @@ export default function GamingPage() {
                         <div 
                           key={idx}
                           onClick={() => setSelectedCasualCategory(cat.title)}
-                          className={`bg-gradient-to-r ${cat.gradient} p-4 sm:p-5 rounded-2xl border shadow-md hover:shadow-lg transition-all cursor-pointer group flex flex-col justify-between relative overflow-hidden`}
+                          className={`${cat.gradient} p-4 sm:p-5 rounded-2xl border shadow-md hover:shadow-lg transition-all cursor-pointer group flex flex-col justify-between relative overflow-hidden`}
                         >
                           <div className="absolute right-2 bottom-0 opacity-10 pointer-events-none">
                             <IconComponent size={110} />
@@ -847,17 +866,17 @@ export default function GamingPage() {
                     </span>
                   </div>
 
-                  {/* CREATE SESSION WITH MODE & TARGET ROUNDS */}
+                  {/* CREATE SESSION WITH MODE, WIN CONDITION & TARGET */}
                   <div className="bg-white rounded-2xl p-3 sm:p-4 border border-slate-200 shadow-xs space-y-3">
                     <span className="text-[10px] font-bold uppercase text-slate-400 block">Initialize New {selectedCasualCategory} Match</span>
                     
                     <div className="grid grid-cols-1 sm:grid-cols-12 gap-2">
                       <input 
                         type="text" 
-                        placeholder={`Session Name (e.g. Friday ${selectedCasualCategory})`} 
+                        placeholder={`Game Name (Auto-assigned: ${casualName})`} 
                         value={casualName} 
                         onChange={(e) => setCasualName(e.target.value)} 
-                        className="sm:col-span-6 bg-slate-50 border border-slate-200 p-2 rounded-xl text-xs font-bold text-slate-800 focus:outline-none"
+                        className="sm:col-span-4 bg-slate-50 border border-slate-200 p-2 rounded-xl text-xs font-bold text-slate-800 focus:outline-none"
                       />
 
                       {/* SOLO vs DUO TOGGLE */}
@@ -878,20 +897,49 @@ export default function GamingPage() {
                         </button>
                       </div>
 
-                      <input 
-                        type="number" 
-                        value={targetRoundsInput} 
-                        onChange={(e) => setTargetRoundsInput(e.target.value)} 
-                        className="sm:col-span-3 bg-slate-50 border border-slate-200 p-2 rounded-xl text-xs font-bold text-slate-800 text-center focus:outline-none"
-                        placeholder="5 Rounds"
-                      />
+                      {/* WIN CONDITION TOGGLE (ROUNDS vs POINTS) */}
+                      <div className="sm:col-span-3 flex items-center gap-1 bg-slate-50 p-1 rounded-xl border border-slate-200">
+                        <button 
+                          type="button"
+                          onClick={() => setWinCondition('rounds')}
+                          className={`flex-1 py-1 rounded-lg text-[10px] font-black uppercase flex items-center justify-center gap-0.5 transition-colors ${winCondition === 'rounds' ? 'bg-slate-900 text-white' : 'text-slate-500'}`}
+                        >
+                          Rounds Goal
+                        </button>
+                        <button 
+                          type="button"
+                          onClick={() => setWinCondition('points')}
+                          className={`flex-1 py-1 rounded-lg text-[10px] font-black uppercase flex items-center justify-center gap-0.5 transition-colors ${winCondition === 'points' ? 'bg-rose-600 text-white' : 'text-slate-500'}`}
+                        >
+                          Points Goal
+                        </button>
+                      </div>
+
+                      {/* TARGET INPUT */}
+                      {winCondition === 'points' ? (
+                        <input 
+                          type="number" 
+                          value={targetPointsInput} 
+                          onChange={(e) => setTargetPointsInput(e.target.value)} 
+                          className="sm:col-span-2 bg-slate-50 border border-slate-200 p-2 rounded-xl text-xs font-bold text-slate-800 text-center focus:outline-none"
+                          placeholder="500 Points"
+                        />
+                      ) : (
+                        <input 
+                          type="number" 
+                          value={targetRoundsInput} 
+                          onChange={(e) => setTargetRoundsInput(e.target.value)} 
+                          className="sm:col-span-2 bg-slate-50 border border-slate-200 p-2 rounded-xl text-xs font-bold text-slate-800 text-center focus:outline-none"
+                          placeholder="5 Rounds"
+                        />
+                      )}
                     </div>
 
                     <button 
                       onClick={handleCreateCasualSession}
                       className="w-full h-9 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs uppercase tracking-wider rounded-xl shadow-xs transition-transform active:scale-95 flex items-center justify-center gap-1.5"
                     >
-                      <Plus size={14}/> Start {selectedCasualCategory} ({playMode === 'duo' ? '2v2 Duo' : 'Solo'})
+                      <Plus size={14}/> Start {casualName || 'New Game'} ({winCondition === 'points' ? `${targetPointsInput} Pts Goal` : `${targetRoundsInput} Rounds`})
                     </button>
                   </div>
 
@@ -909,24 +957,46 @@ export default function GamingPage() {
                       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                         {casualSessions.filter(s => s.game_title === selectedCasualCategory).map((s: CasualSession) => {
                           const roundsCount = s.rounds.length > 0 ? Math.max(...s.rounds.map(r => r.round_number)) : 0;
+                          const rankedPlayers = getRankedCasualPlayers(s);
+                          const winner = rankedPlayers[0];
+
+                          const sessionCompleted = s.win_condition === 'points'
+                            ? rankedPlayers.some(p => p.totalScore >= (s.target_points || 500))
+                            : roundsCount >= (s.target_rounds || 5);
+
                           return (
                             <div 
                               key={s.id}
                               onClick={() => setSelectedCasualId(s.id)}
-                              className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-xs hover:border-slate-300 cursor-pointer flex flex-col relative"
+                              className={`bg-white p-3.5 rounded-2xl border shadow-xs hover:border-indigo-300 transition-all cursor-pointer flex flex-col relative ${
+                                sessionCompleted ? 'border-emerald-500/50 bg-emerald-50/10' : 'border-slate-200'
+                              }`}
                             >
-                              <div className="flex justify-between items-start mb-2 pr-6">
+                              <div className="flex justify-between items-start mb-1.5 pr-6">
                                 <div>
-                                  <div className="flex items-center gap-1.5">
+                                  <div className="flex items-center gap-1.5 flex-wrap">
                                     <span className="text-[8px] font-extrabold uppercase px-1.5 py-0.2 rounded bg-indigo-50 text-indigo-600 border border-indigo-100">
                                       {s.play_mode === 'duo' ? 'Duo (2v2)' : 'Solo'}
                                     </span>
-                                    {/* AUTOMATIC DATE DISPLAY BADGE */}
+
+                                    {sessionCompleted ? (
+                                      <span className="text-[8px] font-extrabold uppercase px-1.5 py-0.2 rounded bg-emerald-100 text-emerald-800 border border-emerald-200 flex items-center gap-0.5">
+                                        <CheckCircle2 size={10}/> Completed
+                                      </span>
+                                    ) : (
+                                      <span className="text-[8px] font-extrabold uppercase px-1.5 py-0.2 rounded bg-amber-50 text-amber-700 border border-amber-200">
+                                        In Progress
+                                      </span>
+                                    )}
+
                                     <span className="text-[9px] font-bold text-slate-400 flex items-center gap-0.5">
                                       <Calendar size={10}/> {formatDate(s.created_at)}
                                     </span>
                                   </div>
-                                  <h4 className="font-extrabold text-slate-900 text-sm truncate mt-1">{s.session_name}</h4>
+
+                                  <h4 className={`font-black text-sm truncate mt-1 ${sessionCompleted ? 'text-emerald-700' : 'text-slate-900'}`}>
+                                    {s.session_name}
+                                  </h4>
                                 </div>
                               </div>
 
@@ -937,9 +1007,46 @@ export default function GamingPage() {
                                 <Trash2 size={13}/>
                               </button>
 
-                              <div className="mt-2 grid grid-cols-2 gap-2 border-t border-slate-100 pt-2 text-[10px] font-bold text-slate-500">
-                                <div>Players: <b className="text-slate-800">{s.players.length}</b></div>
-                                <div>Progress: <b className="text-slate-800">{roundsCount} / {s.target_rounds || 5} Rds</b></div>
+                              {/* PARTICIPANTS & SCORES BADGES OUTSIDE */}
+                              <div className="mt-2 space-y-1 border-t border-slate-100 pt-2">
+                                <span className="text-[9px] font-extrabold uppercase text-slate-400 block mb-1">
+                                  Participants & Scores:
+                                </span>
+                                {s.players.length === 0 ? (
+                                  <span className="text-[10px] text-slate-400 italic">No players added yet</span>
+                                ) : (
+                                  <div className="flex flex-wrap gap-1">
+                                    {rankedPlayers.map((p, pIdx) => {
+                                      const isWinner = sessionCompleted && pIdx === 0 && p.totalScore > 0;
+                                      return (
+                                        <span 
+                                          key={p.id}
+                                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-bold border ${
+                                            isWinner 
+                                              ? 'bg-amber-400 text-slate-900 border-amber-500 shadow-2xs font-black' 
+                                              : 'bg-slate-50 text-slate-700 border-slate-200'
+                                          }`}
+                                        >
+                                          {isWinner && <Crown size={11} className="fill-slate-900 text-slate-900"/>}
+                                          <span>{p.player_name}</span>
+                                          {s.play_mode === 'duo' && (
+                                            <span className="text-[8px] opacity-75">T{p.team_number || 1}</span>
+                                          )}
+                                          <b className="ml-0.5 px-1 py-0.2 rounded bg-black/10">{p.totalScore}</b>
+                                        </span>
+                                      );
+                                    })}
+                                  </div>
+                                )}
+                              </div>
+
+                              <div className="mt-2.5 border-t border-slate-100 pt-2 flex justify-between items-center text-[10px] font-bold text-slate-500">
+                                <div>Goal: <b className="text-slate-800">{s.win_condition === 'points' ? `${s.target_points || 500} Pts` : `${s.target_rounds || 5} Rds`}</b></div>
+                                {sessionCompleted && winner && (
+                                  <div className="text-emerald-700 font-extrabold flex items-center gap-0.5">
+                                    <Trophy size={11} className="text-amber-500"/> Winner: {winner.player_name}
+                                  </div>
+                                )}
                               </div>
                             </div>
                           );
@@ -1038,7 +1145,7 @@ export default function GamingPage() {
         // ==========================================
         // SINGLE VIEWPORT CASUAL SCOREKEEPER
         // ==========================================
-        <div className="space-y-3 animate-in fade-in duration-200">
+        <div className="space-y-4 animate-in fade-in duration-200">
           
           {/* Sticky Top Header */}
           <div className="flex items-center justify-between border-b border-slate-200 pb-2">
@@ -1061,7 +1168,9 @@ export default function GamingPage() {
 
             <div className="flex items-center gap-1.5 shrink-0">
               <span className="text-[10px] font-extrabold uppercase bg-slate-100 text-slate-700 px-2 py-1 rounded-lg border border-slate-200">
-                Rd {currentRoundsPlayed}/{currentCasual.target_rounds || 5}
+                {currentCasual.win_condition === 'points' 
+                  ? `Goal: ${currentCasual.target_points || 500} Pts` 
+                  : `Rd ${currentRoundsPlayed}/${currentCasual.target_rounds || 5}`}
               </span>
               <button 
                 onClick={() => setIsAddPlayerModalOpen(true)}
@@ -1081,18 +1190,18 @@ export default function GamingPage() {
               <div className="flex items-center gap-2 truncate">
                 <Trophy size={18} className="text-amber-400 shrink-0"/>
                 <span className="text-xs font-bold truncate">
-                  Winner: <b>{getRankedCasualPlayers()[0]?.player_name || 'N/A'}</b> ({getRankedCasualPlayers()[0]?.totalScore || 0} pts)
+                  Winner: <b>{getRankedCasualPlayers(currentCasual)[0]?.player_name || 'N/A'}</b> ({getRankedCasualPlayers(currentCasual)[0]?.totalScore || 0} pts)
                 </span>
               </div>
               <button onClick={handleAddExtraRound} className="px-2.5 py-1 bg-indigo-600 text-white text-[10px] font-bold uppercase rounded-lg shrink-0">
-                + Extra Round
+                + Extend Goal
               </button>
             </div>
           )}
 
           {/* HORIZONTAL LIVE SCOREBOARD BADGES */}
           <div className="flex gap-2 overflow-x-auto pb-1 no-scrollbar">
-            {getRankedCasualPlayers().map((p, idx) => (
+            {getRankedCasualPlayers(currentCasual).map((p, idx) => (
               <div key={p.id} className="bg-white border border-slate-200/80 px-2.5 py-1.5 rounded-xl shadow-2xs shrink-0 flex items-center gap-2">
                 <span className={`w-4 h-4 rounded-full flex items-center justify-center font-black text-[9px] ${idx === 0 ? 'bg-amber-400 text-slate-900' : idx === 1 ? 'bg-slate-300 text-slate-800' : 'bg-slate-100 text-slate-600'}`}>
                   {idx + 1}
@@ -1120,9 +1229,222 @@ export default function GamingPage() {
             ))}
           </div>
 
-          {/* SINGLE INTEGRATED MATRIX TABLE */}
+          {/* BEAUTIFIED NEW ROUND SCORE ENTRY CONTROL BAR (MOBILE OPTIMIZED 2-COL GRID) */}
+          {!isGameOver && currentCasual.players.length > 0 && (
+            <div className="bg-linear-to-b from-slate-900 to-slate-950 text-white rounded-2xl p-2.5 sm:p-4 shadow-xl border border-slate-800 space-y-3">
+              <div className="flex items-center justify-between border-b border-slate-800/80 pb-2">
+                <span className="text-xs font-black uppercase tracking-wider text-emerald-400 flex items-center gap-1.5">
+                  <FlameIcon size={14} className="text-emerald-400"/> Enter Scores for Round {currentRoundsPlayed + 1}
+                </span>
+                <span className="text-[10px] font-bold text-slate-400">
+                  {currentCasual.game_title === 'UNO' ? 'Select "The UNO" Winner' : `${currentCasual.players.length} Players Active`}
+                </span>
+              </div>
+
+              {/* Player Inputs Grid (2 columns on mobile, 4 on desktop) */}
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
+                {currentCasual.players.map(p => {
+                  const isUnoWinner = ginPlayerId === p.id;
+                  const expr = unoExpressions[p.id] || "";
+                  const calculatedSum = getUnoPlayerCalculatedTotal(p.id);
+                  const scoreVal = roundScoresInput[p.id] || "0";
+
+                  if (currentCasual.game_title === 'UNO') {
+                    return (
+                      <div 
+                        key={p.id}
+                        className={`p-2 rounded-xl border transition-all flex flex-col justify-between space-y-2 ${
+                          isUnoWinner 
+                            ? 'bg-emerald-500/15 border-emerald-500/60 shadow-xs' 
+                            : 'bg-slate-800/50 border-slate-700/60'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-black text-slate-100 truncate">{p.player_name}</span>
+
+                          {/* "The UNO" Winner Selector */}
+                          <button 
+                            type="button"
+                            onClick={() => {
+                              setGinPlayerId(p.id);
+                              handleScoreInputChange(p.id, "0");
+                            }}
+                            className={`px-1.5 py-0.5 rounded text-[8px] font-black uppercase flex items-center gap-0.5 border ${
+                              isUnoWinner 
+                                ? 'bg-amber-400 text-slate-950 border-amber-400' 
+                                : 'bg-slate-800 text-slate-400 border-slate-700'
+                            }`}
+                          >
+                            <Crown size={9} className={isUnoWinner ? 'fill-slate-950 text-slate-950' : ''}/> The UNO
+                          </button>
+                        </div>
+
+                        {isUnoWinner ? (
+                          <div className="bg-emerald-950/60 border border-emerald-500/40 p-1.5 rounded-lg text-center my-auto">
+                            <span className="text-[9px] font-black uppercase text-emerald-400 block">Round Winner</span>
+                            <span className="text-[8px] text-slate-300">Sum of all card points</span>
+                          </div>
+                        ) : (
+                          <div className="space-y-1.5 text-[9px]">
+                            {/* Live Card Expression Input (e.g. "9+5+4+6") */}
+                            <div className="space-y-1">
+                              <label className="text-[8px] font-bold text-slate-400 flex justify-between items-center">
+                                <span>Cards (0-9):</span>
+                                <span className="text-emerald-400 font-extrabold">{evaluateCardExpression(expr)} pts</span>
+                              </label>
+                              <input 
+                                type="text"
+                                placeholder="e.g. 9+5+4+6"
+                                value={expr}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  setUnoExpressions(prev => ({ ...prev, [p.id]: val }));
+                                }}
+                                className="w-full bg-slate-900 border border-slate-700 px-2 py-1 rounded text-xs font-bold text-white focus:outline-none focus:border-rose-500"
+                              />
+
+                              {/* Digit Helper Buttons */}
+                              <div className="grid grid-cols-5 gap-0.5 pt-0.5">
+                                {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map(d => (
+                                  <button
+                                    key={d}
+                                    type="button"
+                                    onClick={() => handleUnoAddDigitToExpr(p.id, d)}
+                                    className="py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-[9px] font-bold text-slate-200 border border-slate-700/80"
+                                  >
+                                    +{d}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+
+                            {/* Action Cards (+20) */}
+                            <div className="flex items-center justify-between bg-slate-900/80 p-1 rounded-md border border-slate-700/50">
+                              <span className="text-amber-300 font-bold">Action (+20):</span>
+                              <div className="flex items-center gap-1">
+                                <button 
+                                  type="button" 
+                                  onClick={() => setUnoActionCounts(prev => ({ ...prev, [p.id]: Math.max(0, (prev[p.id] || 0) - 1) }))}
+                                  className="w-5 h-5 rounded bg-slate-800 text-slate-300 font-black flex items-center justify-center"
+                                >
+                                  -
+                                </button>
+                                <span className="w-4 text-center font-black text-white">{unoActionCounts[p.id] || 0}</span>
+                                <button 
+                                  type="button" 
+                                  onClick={() => setUnoActionCounts(prev => ({ ...prev, [p.id]: (prev[p.id] || 0) + 1 }))}
+                                  className="w-5 h-5 rounded bg-slate-800 text-slate-300 font-black flex items-center justify-center"
+                                >
+                                  +
+                                </button>
+                              </div>
+                            </div>
+
+                            {/* Wild Cards (+50) */}
+                            <div className="flex items-center justify-between bg-slate-900/80 p-1 rounded-md border border-slate-700/50">
+                              <span className="text-rose-400 font-bold">Wild (+50):</span>
+                              <div className="flex items-center gap-1">
+                                <button 
+                                  type="button" 
+                                  onClick={() => setUnoWildCounts(prev => ({ ...prev, [p.id]: Math.max(0, (prev[p.id] || 0) - 1) }))}
+                                  className="w-5 h-5 rounded bg-slate-800 text-slate-300 font-black flex items-center justify-center"
+                                >
+                                  -
+                                </button>
+                                <span className="w-4 text-center font-black text-white">{unoWildCounts[p.id] || 0}</span>
+                                <button 
+                                  type="button" 
+                                  onClick={() => setUnoWildCounts(prev => ({ ...prev, [p.id]: (prev[p.id] || 0) + 1 }))}
+                                  className="w-5 h-5 rounded bg-slate-800 text-slate-300 font-black flex items-center justify-center"
+                                >
+                                  +
+                                </button>
+                              </div>
+                            </div>
+
+                            {/* Total calculated card points */}
+                            <div className="text-center font-black text-rose-400 border-t border-slate-800 pt-1">
+                              Remaining: {calculatedSum} pts
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  }
+
+                  // GENERAL CASUAL GAME CALCULATOR (Digu, 10, Bondi)
+                  return (
+                    <div 
+                      key={p.id}
+                      className={`p-2 rounded-xl border transition-all flex flex-col justify-between space-y-1.5 ${
+                        isUnoWinner 
+                          ? 'bg-amber-500/10 border-amber-500/50 shadow-xs' 
+                          : 'bg-slate-800/50 border-slate-700/60'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-black text-slate-100 truncate">{p.player_name}</span>
+
+                        <button 
+                          type="button"
+                          onClick={() => setGinPlayerId(isUnoWinner ? null : p.id)}
+                          className={`px-1.5 py-0.5 rounded text-[8px] font-black uppercase flex items-center gap-0.5 border ${
+                            isUnoWinner 
+                              ? 'bg-amber-400 text-slate-950 border-amber-400' 
+                              : 'bg-slate-800 text-slate-400 border-slate-700'
+                          }`}
+                        >
+                          <Star size={9} className={isUnoWinner ? 'fill-slate-950 text-slate-950' : ''}/> Gin
+                        </button>
+                      </div>
+
+                      {/* Score Stepper */}
+                      <div className="flex items-center gap-1">
+                        <button 
+                          type="button"
+                          onClick={() => handleAdjustScoreInput(p.id, -1)}
+                          className="w-7 h-7 rounded bg-slate-800 text-slate-300 font-bold flex items-center justify-center border border-slate-700 shrink-0"
+                        >
+                          <Minus size={11}/>
+                        </button>
+
+                        <input 
+                          type="number" 
+                          placeholder="0"
+                          value={scoreVal}
+                          onChange={(e) => handleScoreInputChange(p.id, e.target.value)}
+                          className="w-full h-7 bg-slate-900 border border-slate-700 text-center text-xs font-black text-white rounded focus:outline-none"
+                        />
+
+                        <button 
+                          type="button"
+                          onClick={() => handleAdjustScoreInput(p.id, 1)}
+                          className="w-7 h-7 rounded bg-slate-800 text-slate-300 font-bold flex items-center justify-center border border-slate-700 shrink-0"
+                        >
+                          <Plus size={11}/>
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Submit Round Button */}
+              <button 
+                onClick={handleSaveCasualRoundScores}
+                className="w-full h-10 bg-emerald-500 hover:bg-emerald-400 active:scale-98 text-slate-950 font-black text-xs uppercase tracking-wider rounded-xl shadow-lg shadow-emerald-950/40 flex items-center justify-center gap-2 transition-all"
+              >
+                <CheckCircle2 size={16}/> Save Round {currentRoundsPlayed + 1} Scores
+              </button>
+            </div>
+          )}
+
+          {/* HISTORICAL ROUNDS MATRIX TABLE */}
           <div className="bg-white rounded-2xl border border-slate-200/80 p-2 sm:p-3 shadow-xs space-y-2">
-            <div className="overflow-x-auto max-h-[60vh]">
+            <span className="text-[9px] font-extrabold uppercase text-slate-400 block px-1">
+              Score History Matrix
+            </span>
+            <div className="overflow-x-auto max-h-[50vh]">
               <table className="w-full border-collapse text-left text-xs font-semibold">
                 <thead>
                   <tr className="bg-slate-50 text-slate-400 uppercase font-bold text-[9px] border-b border-slate-100">
@@ -1162,47 +1484,6 @@ export default function GamingPage() {
                       </td>
                     </tr>
                   ))}
-
-                  {!isGameOver && currentCasual.players.length > 0 && (
-                    <tr className="bg-indigo-50/30 font-bold border-t-2 border-indigo-100">
-                      <td className="p-2 text-indigo-700 font-black text-xs">
-                        Rd {currentRoundsPlayed + 1}
-                      </td>
-                      {currentCasual.players.map(p => {
-                        const isGin = ginPlayerId === p.id;
-                        return (
-                          <td key={p.id} className="p-1.5 text-center">
-                            <div className="flex flex-col items-center gap-1">
-                              <button 
-                                type="button"
-                                onClick={() => setGinPlayerId(isGin ? null : p.id)}
-                                className={`p-1 rounded text-[8px] font-black flex items-center gap-0.5 border ${isGin ? 'bg-amber-400 text-slate-900 border-amber-400' : 'bg-white text-slate-400 border-slate-200'}`}
-                              >
-                                <Star size={9} className={isGin ? 'fill-slate-900' : ''}/> Gin
-                              </button>
-
-                              <input 
-                                type="number" 
-                                placeholder="0"
-                                value={roundScoresInput[p.id] || ""}
-                                onChange={(e) => handleScoreInputChange(p.id, e.target.value)}
-                                className="w-14 bg-white border border-slate-200 p-1 rounded-md text-xs font-black text-center text-slate-900 focus:outline-none shadow-2xs"
-                              />
-                            </div>
-                          </td>
-                        );
-                      })}
-                      <td className="p-1.5 text-center">
-                        <button 
-                          onClick={handleSaveCasualRoundScores}
-                          className="p-2 bg-slate-900 text-white rounded-lg text-xs font-bold"
-                          title="Save Round"
-                        >
-                          <CheckCircle2 size={14}/>
-                        </button>
-                      </td>
-                    </tr>
-                  )}
                 </tbody>
               </table>
             </div>
